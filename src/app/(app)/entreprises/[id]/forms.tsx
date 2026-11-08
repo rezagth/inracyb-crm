@@ -167,6 +167,8 @@ export function DeleteCompanyButton({ id }: { id: string }) {
           try {
             await deleteCompanyAction(id);
           } catch (e) {
+            // Next signale une redirection réussie par une exception : ce n'est pas une erreur.
+            if (e instanceof Error && (e.message === "NEXT_REDIRECT" || String((e as { digest?: string }).digest ?? "").startsWith("NEXT_REDIRECT"))) return;
             alert(e instanceof Error ? e.message : "Suppression impossible.");
           }
         });
