@@ -5,7 +5,7 @@ import { today } from "@/lib/format";
 import { paymentStatusOf, signPayload } from "@/lib/stratcyber-link";
 
 /**
- * Envoie à StratCyber (cockpit RSSI) la liste des clients sous contrat et leur statut de paiement.
+ * Envoie à StratCyber (cockpit RSSI) la liste des clients (gagnés ou sous contrat) et leur statut de paiement.
  * Sens unique CRM → StratCyber, jamais l'inverse. N'envoie que : identifiant, nom, secteur, statut.
  * Sans STRATCYBER_URL et STRATCYBER_WEBHOOK_SECRET dans .env, ne fait rien. Idempotent : peut être relancé.
  */
@@ -33,8 +33,9 @@ export async function syncStratcyber(): Promise<{ ok: boolean; message: string }
   const t = today();
 
   const contracts = (await db.select().from(schema.contracts));
-  const companyIds = [...new Set(contracts.map((c) => c.companyId))];
-  if (companyIds.length === 0) return { ok: true, message: "Aucun client sous contrat à envoyer." };
+  const won = await db.select({ id: schema.companies.id }).from(schema.companies).where(eq(schema.companies.stage, "gagne"));
+  const companyIds = [...new Set([...contracts.map((c) => c.companyId), ...won.map((w) => w.id)])];
+  if (companyIds.length === 0) return { ok: true, message: "Aucun client à envoyer." };
   const companies = (await db.select().from(schema.companies).where(inArray(schema.companies.id, companyIds)));
   const late = (await db
       .select({ companyId: schema.invoices.companyId, dueDate: schema.invoices.dueDate })

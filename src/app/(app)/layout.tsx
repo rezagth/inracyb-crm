@@ -1,6 +1,7 @@
+import { after } from "next/server";
 import { and, eq, lt, ne, sql } from "drizzle-orm";
 import { BUILT, NAV } from "@/lib/nav";
-import { dailyScan } from "@/server/automations";
+import { dailyScan, syncStratcyberIfDue } from "@/server/automations";
 import { db, schema } from "@/db";
 import { requireUser } from "@/lib/auth";
 import { today } from "@/lib/format";
@@ -13,6 +14,7 @@ export const dynamic = "force-dynamic";
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const user = await requireUser();
   await dailyScan();
+  after(() => syncStratcyberIfDue());
   const t = today();
   const lateTasks = (await db.select({ c: sql<number>`count(*)::int` }).from(schema.tasks).where(and(eq(schema.tasks.done, false), lt(schema.tasks.dueDate, t))).limit(1))[0]?.c ?? 0;
   const lateInvoices =

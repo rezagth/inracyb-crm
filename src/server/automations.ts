@@ -91,6 +91,21 @@ export async function fiscalTasks(): Promise<number> {
   return n;
 }
 
+/**
+ * Synchronisation avec StratCyber, au plus une fois par heure, à l'ouverture du CRM.
+ * À appeler dans `after()` : sur Vercel, une promesse laissée en l'air après la réponse est gelée.
+ */
+export async function syncStratcyberIfDue() {
+  try {
+    const row = (await db.select().from(schema.automations).where(eq(schema.automations.key, "_stratcyber")).limit(1))[0];
+    if (row?.lastRunAt && Date.now() - row.lastRunAt.getTime() < 3_600_000) return;
+    await db.insert(schema.automations).values({ key: "_stratcyber", enabled: false, lastRunAt: new Date() }).onConflictDoUpdate({ target: schema.automations.key, set: { lastRunAt: new Date() } });
+    await syncStratcyber();
+  } catch {
+    /* le lien StratCyber ne doit jamais gêner le CRM */
+  }
+}
+
 /** Passage automatique à l'ouverture du CRM (au plus une fois par jour). */
 export async function dailyScan() {
   const t = today();
@@ -102,7 +117,6 @@ export async function dailyScan() {
     if ((await autoOn("contrats")) && (await db.select().from(schema.contracts).where(eq(schema.contracts.status, "actif")).limit(1))[0]) await billContracts();
     if ((await autoOn("retard"))) await lateInvoiceTasks();
     if ((await autoOn("fiscal"))) await fiscalTasks();
-    void syncStratcyber().catch(() => undefined);
   } catch {
     /* une automatisation ne doit jamais bloquer l'ouverture du CRM */
   }
