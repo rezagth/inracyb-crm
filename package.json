@@ -1,0 +1,57 @@
+{
+  "name": "infracyb-crm",
+  "version": "0.1.0",
+  "private": true,
+  "description": "InfraCyb CRM — système de gestion d'entreprise interne (Next.js + Postgres)",
+  "scripts": {
+    "setup": "node scripts/setup.mjs && npm run db:migrate",
+    "predev": "node scripts/setup.mjs",
+    "dev": "next dev",
+    "build": "next build",
+    "prestart": "node scripts/setup.mjs",
+    "start": "next start",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "tsx scripts/migrate.ts",
+    "db:seed": "tsx scripts/seed.ts",
+    "db:demo": "tsx scripts/seed.ts --demo",
+    "db:backup": "tsx scripts/backup.ts",
+    "sync:stratcyber": "tsx scripts/sync-stratcyber.ts",
+    "db:studio": "drizzle-kit studio",
+    "test": "tsx --test tests/*.test.ts",
+    "db:copy-sqlite": "tsx scripts/copy-from-sqlite.ts"
+  },
+  "engines": {
+    "node": ">=20.19"
+  },
+  "dependencies": {
+    "@neon/config": "^1.13.0",
+    "@neon/env": "^2.1.0",
+    "bcryptjs": "^3.0.3",
+    "drizzle-orm": "^0.45.4",
+    "jose": "^6.2.15",
+    "next": "^16.4.5",
+    "pg": "^8.13.1",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "server-only": "^0.0.1",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.2.17",
+    "@tailwindcss/postcss": "^4.3.5",
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/node": "^26.6.6",
+    "@types/pg": "^8.11.10",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "better-sqlite3": "^13.0.3",
+    "drizzle-kit": "^0.31.11",
+    "eslint": "^9.39.5",
+    "eslint-config-next": "^16.4.5",
+    "tailwindcss": "^4.3.5",
+    "tsx": "^4.23.15",
+    "typescript": "^6.0.3"
+  }
+}
