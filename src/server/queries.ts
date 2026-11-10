@@ -178,6 +178,7 @@ export async function getProfile() {
     iaBrand: s.iaBrand,
     phone: s.phone,
     email: s.email,
+    website: s.website,
     prixAuditCents: s.prixAuditCents,
     calUrl: s.calUrl,
   };

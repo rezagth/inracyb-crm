@@ -7,7 +7,7 @@ import { addDays, today } from "./format";
 
 export type OfferKey = "audit" | "ciso" | "ia";
 export type Prospect = { name: string; sector: string; contact: string; role: string; email: string; phone: string };
-export type Profile = { me: string; company: string; iaBrand: string; phone: string; email: string; prixAuditCents: number; calUrl: string };
+export type Profile = { me: string; company: string; iaBrand: string; phone: string; email: string; website: string; prixAuditCents: number; calUrl: string };
 export type Step = { t: string; lines: string[]; tip?: string };
 export type Mail = { k: string; d: number; label: string; subject: string; body: string; tip: string };
 export type Objection = { id: string; o: string; q: string; a: string };
@@ -89,7 +89,7 @@ function ctx(c: Prospect, offer: OfferKey, p: Profile) {
     c1: frDay(biz[0]) + " à 10 h",
     c2: frDay(biz[1]) + " à 14 h 30",
     later: frDay(addDays(today(), 7)),
-    sig: me + "\n" + (offer === "ia" ? "Automatisation IA — " + brand : "Consultant en cybersécurité — " + brand) + "\n" + (p.phone.trim() || "[ton numéro]") + " · " + (p.email.trim() || "[ton e-mail]"),
+    sig: me + "\n" + (offer === "ia" ? "Automatisation IA — " + brand : "Consultant en cybersécurité — " + brand) + "\n" + (p.phone.trim() || "[ton numéro]") + " · " + (p.email.trim() || "[ton e-mail]") + (p.website.trim() ? "\n" + p.website.trim().replace(/^https?:\/\//, "").replace(/\/$/, "") : ""),
   };
 }
 
@@ -101,14 +101,14 @@ export function scripts(c: Prospect, offer: OfferKey, p: Profile) {
     let steps: Step[], vm: string, mails: Mail[];
     if (offer === "audit") {
       steps = [open,
-        { t: "Raison de l'appel", lines: ["Mon métier, c'est la sécurité informatique des " + S.who + " et des PME.", "Chez " + x.co + ", vous gérez " + S.data + ". Un des scénarios les plus redoutés pour une structure comme la vôtre, c'est " + S.risk + ".", "Je propose un audit à prix fixe qui montre clairement où vous en êtes et quoi corriger en priorité."] },
+        { t: "Raison de l'appel", lines: ["Mon métier, c'est la sécurité informatique des " + S.who + (S.who === "PME" ? "" : " et des PME") + ".", "Chez " + x.co + ", vous gérez " + S.data + ". Un des scénarios les plus redoutés pour une structure comme la vôtre, c'est " + S.risk + ".", "Je propose un audit à prix fixe qui montre clairement où vous en êtes et quoi corriger en priorité."] },
         { t: "Questions de découverte", lines: ["Aujourd'hui, qui s'occupe de votre informatique : un prestataire, quelqu'un en interne, ou un peu tout le monde ?", "Vos sauvegardes : avez-vous déjà testé une restauration ?", "La double authentification est-elle activée sur toutes vos messageries ?", "Votre assureur ou vos clients vous ont-ils déjà envoyé un questionnaire sécurité ?"], tip: "Note les réponses. Chaque « je ne sais pas » est un argument pour l'audit." },
         { t: "Présenter l'audit", lines: ["Concrètement : on fait le point ensemble, puis je vérifie les comptes et mots de passe, les sauvegardes, la messagerie, les postes et les accès à distance.", "Vous recevez un rapport clair avec un plan d'action priorisé. Prix fixe : " + x.prix + ", sans surprise.", "Le rapport vous appartient, que l'on travaille ensemble ensuite ou non."] },
         close("cadrer l'audit"), fallback];
       vm = "Bonjour " + x.sal.oral + ", " + x.me + " de " + x.brand + ", au " + x.phone + ". Je vous appelle au sujet de la sécurité informatique de " + x.co + " : je propose un audit à prix fixe pour les " + S.who + ". Je vous envoie un mail court et je retente ma chance " + x.later + ". Bonne journée.";
       mails = [
         { k: "J0", d: 0, label: "Premier contact", subject: "Une question sur la sécurité de " + x.co,
-          body: "Bonjour " + x.sal.mail + ",\n\nJe m'appelle " + x.me + ", consultant en cybersécurité (" + x.brand + "). Je me consacre à la sécurité informatique des " + S.who + " et des PME.\n\nChez " + x.co + ", vous gérez " + S.data + ". Un des scénarios les plus redoutés pour une structure comme la vôtre, c'est " + S.risk + " — et il se joue souvent sur trois points : la double authentification, les sauvegardes et la gestion des accès.\n\nJe propose un audit cyber à prix fixe (" + x.prix + ") : je vérifie ces points et quelques autres, puis vous recevez un rapport clair avec un plan d'action priorisé. Le rapport vous appartient, que l'on travaille ensemble ensuite ou non.\n\nSeriez-vous disponible 20 minutes " + x.c1 + " ou " + x.c2 + " pour en parler ?\n\nBien cordialement,\n" + x.sig,
+          body: "Bonjour " + x.sal.mail + ",\n\nJe m'appelle " + x.me + ", consultant en cybersécurité (" + x.brand + "). Je me consacre à la sécurité informatique des " + S.who + (S.who === "PME" ? "" : " et des PME") + ".\n\nChez " + x.co + ", vous gérez " + S.data + ". Un des scénarios les plus redoutés pour une structure comme la vôtre, c'est " + S.risk + " — et il se joue souvent sur trois points : la double authentification, les sauvegardes et la gestion des accès.\n\nJe propose un audit cyber à prix fixe (" + x.prix + ") : je vérifie ces points et quelques autres, puis vous recevez un rapport clair avec un plan d'action priorisé. Le rapport vous appartient, que l'on travaille ensemble ensuite ou non.\n\nSeriez-vous disponible 20 minutes " + x.c1 + " ou " + x.c2 + " pour en parler ?\n\nBien cordialement,\n" + x.sig,
           tip: "Envoie-le le matin. Personnalise une phrase si tu as vu quelque chose sur son site." },
         { k: "J+3", d: 3, label: "Relance courte", subject: "Re: Une question sur la sécurité de " + x.co,
           body: "Bonjour " + x.sal.mail + ",\n\nJe me permets de remonter mon message avec une seule question, sans engagement : savez-vous si la double authentification est activée sur toutes les messageries de " + x.co + " ?\n\nSi la réponse est « je ne sais pas », l'audit est fait pour vous.\n\nBien à vous,\n" + x.me,

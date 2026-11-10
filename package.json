@@ -17,6 +17,7 @@
     "db:seed": "tsx scripts/seed.ts",
     "db:demo": "tsx scripts/seed.ts --demo",
     "db:backup": "tsx scripts/backup.ts",
+    "auth:reset": "tsx scripts/reset-password.ts",
     "sync:stratcyber": "tsx scripts/sync-stratcyber.ts",
     "db:studio": "drizzle-kit studio",
     "test": "tsx --test tests/*.test.ts",
