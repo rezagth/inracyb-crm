@@ -2,12 +2,12 @@
 
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
-import { enrichCompanyAction } from "@/server/actions/enrich";
+import { completeCompanyAction } from "@/server/actions/enrich";
 import { Icon } from "@/components/icon";
 import { useToast } from "@/components/mod/toast";
 
-/** Bouton « Chercher l'e-mail et le téléphone » d'une entreprise (lit son site web public). */
-export function EnrichButton({ companyId, label = "Chercher e-mail et téléphone", className = "btn btn-sec" }: { companyId: string; label?: string; className?: string }) {
+/** Bouton « Compléter la fiche » : Annuaire des Entreprises, montant estimé, puis e-mail et téléphone (site web public). */
+export function EnrichButton({ companyId, label = "Compléter la fiche", className = "btn btn-sec" }: { companyId: string; label?: string; className?: string }) {
   const router = useRouter();
   const toast = useToast();
   const [pending, start] = useTransition();
@@ -18,7 +18,7 @@ export function EnrichButton({ companyId, label = "Chercher e-mail et téléphon
       disabled={pending}
       onClick={() =>
         start(async () => {
-          const r = await enrichCompanyAction(companyId);
+          const r = await completeCompanyAction(companyId);
           toast(r.ok ? r.message : r.error);
           router.refresh();
         })
@@ -30,8 +30,8 @@ export function EnrichButton({ companyId, label = "Chercher e-mail et téléphon
   );
 }
 
-/** Lance la recherche sur plusieurs entreprises, une par une (10 au plus par clic). */
-export function EnrichAll({ ids }: { ids: string[] }) {
+/** Complète plusieurs entreprises, une par une (10 au plus par clic). */
+export function EnrichAll({ ids, label = "Compléter les fiches" }: { ids: string[]; label?: string }) {
   const router = useRouter();
   const toast = useToast();
   const [pending, start] = useTransition();
@@ -48,7 +48,7 @@ export function EnrichAll({ ids }: { ids: string[] }) {
           let found = 0;
           setDone(0);
           for (const id of batch) {
-            const r = await enrichCompanyAction(id);
+            const r = await completeCompanyAction(id);
             if (r.ok && r.found) found++;
             setDone((n) => n + 1);
           }
@@ -58,7 +58,7 @@ export function EnrichAll({ ids }: { ids: string[] }) {
       }
     >
       <Icon name="search" />
-      {pending ? `Recherche ${done}/${batch.length}…` : `Trouver les e-mails manquants (${Math.min(ids.length, 10)})`}
+      {pending ? `Recherche ${done}/${batch.length}…` : `${label} (${Math.min(ids.length, 10)})`}
     </button>
   );
 }

@@ -1,11 +1,14 @@
 import Link from "next/link";
-import { listCompanies } from "@/server/queries";
+import { listCompanies, prospectList } from "@/server/queries";
+import { EnrichAll } from "@/components/enrich-button";
 import { stageOf, statusOfStage } from "@/lib/constants";
 import { eur, fd, initials } from "@/lib/format";
 import { Avatar, Badge, Card, EmptyState, PageHeader, toneFor } from "@/components/ui";
 import { Icon } from "@/components/icon";
 
 export const metadata = { title: "Entreprises" };
+/** Compléter une fiche lit des sites web : on laisse jusqu'à 60 s à chaque action. */
+export const maxDuration = 60;
 
 const FILTERS = [
   ["", "Toutes"],
@@ -18,6 +21,8 @@ const FILTERS = [
 export default async function CompaniesPage({ searchParams }: { searchParams: Promise<{ q?: string; status?: string }> }) {
   const { q = "", status = "" } = await searchParams;
   const rows = await listCompanies({ q: q.trim() || undefined, status: status || undefined });
+  const shown = new Set(rows.map((r) => r.id));
+  const incomplete = (await prospectList()).filter((p) => shown.has(p.id) && p.stage !== "perdu" && (!p.email || !p.phone || !p.amountCents || !p.siren)).map((p) => p.id);
   const qs = (st: string) => {
     const p = new URLSearchParams();
     if (q) p.set("q", q);
@@ -31,10 +36,13 @@ export default async function CompaniesPage({ searchParams }: { searchParams: Pr
         title="Entreprises"
         subtitle={`${rows.length} entreprise${rows.length > 1 ? "s" : ""}`}
         actions={
-          <Link href="/entreprises/nouvelle" className="btn btn-pri">
-            <Icon name="plus" />
-            Nouvelle entreprise
-          </Link>
+          <>
+            <EnrichAll ids={incomplete} />
+            <Link href="/entreprises/nouvelle" className="btn btn-pri">
+              <Icon name="plus" />
+              Nouvelle entreprise
+            </Link>
+          </>
         }
       />
       <Card>

@@ -40,7 +40,7 @@ export default async function ProspectionPage({ searchParams }: { searchParams: 
               <Icon name="search" />
               Rechercher des prospects
             </Link>
-            <EnrichAll ids={prospects.filter((p) => !p.email && (p.stage === "qualif" || p.stage === "contacte")).map((p) => p.id)} />
+            <EnrichAll ids={prospects.filter((p) => p.stage !== "perdu" && (!p.email || !p.phone || !p.amountCents || !p.siren)).map((p) => p.id)} />
             <FormButton form="call" label="Noter un appel" icon="phone" companies={prospects.map((p) => ({ id: p.id, name: p.name }))} />
           </>
         }

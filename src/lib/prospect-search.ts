@@ -75,6 +75,8 @@ export type Candidate = {
   postalCode: string;
   city: string;
   effectif: string;
+  /** Code Insee de la tranche d'effectif (ex. « 11 »), vide si inconnu. */
+  effectifCode: string;
   director: { firstName: string; lastName: string; role: string } | null;
   /** L'entreprise s'est opposée à la réutilisation commerciale de ses données : jamais importée ni démarchée. */
   blocked: boolean;
@@ -142,6 +144,7 @@ export function normalizeCompany(raw: unknown, wantDept = ""): Candidate | null 
     postalCode: str(site.code_postal) || str(siege.code_postal),
     city,
     effectif: effectifLabel(str(r.tranche_effectif_salarie) || str(siege.tranche_effectif_salarie)),
+    effectifCode: str(r.tranche_effectif_salarie) || str(siege.tranche_effectif_salarie),
     director: pickDirector(r.dirigeants),
     blocked: r.opposition_diffusion_commerciale === true,
   };
@@ -189,4 +192,22 @@ export function pickPlace(json: unknown, postalCode: string, city = ""): { phone
     if (phone || website) return { phone, website };
   }
   return null;
+}
+
+const norm = (s: string) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+
+/**
+ * Retrouve dans les résultats de l'Annuaire l'entreprise saisie à la main (sans SIREN). Nom identique exigé, puis code postal
+ * ou ville identique quand on les connaît ; sans aucun de ces deux repères, un seul résultat identique est accepté.
+ */
+export function matchByName(items: Candidate[], name: string, postalCode: string, city: string): Candidate | null {
+  const n = norm(name);
+  const same = items.filter((c) => norm(c.name) === n);
+  if (!same.length) return null;
+  const cpOk = /^\d{5}$/.test(postalCode);
+  if (cpOk || city.trim()) {
+    const loc = same.filter((c) => (cpOk && c.postalCode === postalCode) || (city.trim() && norm(c.city) === norm(city)));
+    return loc.length === 1 ? loc[0] : null;
+  }
+  return same.length === 1 ? same[0] : null;
 }

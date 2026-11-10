@@ -5,7 +5,9 @@ import { z } from "zod";
 import { db, schema } from "@/db";
 import { requireUser } from "@/lib/auth";
 import { EFFECTIF_CODES, OFFER_ID, SEARCHABLE_SECTORS, type Sector } from "@/lib/prospect-search";
+import { estimateAmountCents, priorityFor } from "@/lib/estimate";
 import { logEvent } from "../core";
+import { getProfile } from "../queries";
 import { fetchBySiren, findPlace, searchAnnuaire, type FoundPage } from "../prospect-search";
 
 type Fail = { ok: false; error: string };
@@ -53,6 +55,7 @@ export async function importProspectsAction(input: unknown): Promise<{ ok: true;
   const p = importZ.safeParse(input);
   if (!p.success) return { ok: false, error: p.error.issues[0]?.message ?? "Import invalide." };
 
+  const prixAuditCents = (await getProfile()).prixAuditCents;
   const rows = await db.select({ name: schema.companies.name, siren: schema.companies.siren }).from(schema.companies);
   const sirens = new Set(rows.map((r) => r.siren).filter(Boolean));
   const names = new Set(rows.map((r) => r.name.trim().toLowerCase()));
@@ -68,10 +71,11 @@ export async function importProspectsAction(input: unknown): Promise<{ ok: true;
       if (c.blocked) { blocked++; continue; }
       if (sirens.has(c.siren) || names.has(c.name.trim().toLowerCase())) { dup++; continue; }
       const website = /^(https?:\/\/)?[^\s]+\.[^\s]+$/.test(it.website) ? it.website : "";
-      const notes = [`Trouvée par recherche automatique (Annuaire des Entreprises, SIREN ${c.siren}).`, `Activité (NAF) : ${c.naf} · Taille : ${c.effectif}.`, website ? `Site web : ${website}` : "", "E-mail du dirigeant à trouver avant tout envoi."].filter(Boolean).join("\n");
+      const amountCents = estimateAmountCents(OFFER_ID[p.data.offer], c.effectifCode, prixAuditCents);
+      const notes = [`Trouvée par recherche automatique (Annuaire des Entreprises, SIREN ${c.siren}).`, `Activité (NAF) : ${c.naf} · Taille : ${c.effectif}.`, `Montant estimé calculé automatiquement (${OFFER_ID[p.data.offer]}, taille ${c.effectif}) : à ajuster.`, website ? `Site web : ${website}` : "", "E-mail du dirigeant à trouver avant tout envoi."].filter(Boolean).join("\n");
       await db.transaction(async (tx) => {
         const co = (await tx.insert(schema.companies).values({
-          name: c.name, sector: c.sector, source: "Recherche automatique", offer: OFFER_ID[p.data.offer], priority: "moyenne", stage: "qualif",
+          name: c.name, sector: c.sector, source: "Recherche automatique", offer: OFFER_ID[p.data.offer], priority: priorityFor(c.effectifCode), stage: "qualif", amountCents,
           city: c.city, address: c.address, siren: c.siren, notes,
         }).returning({ id: schema.companies.id }))[0];
         if (c.director) await tx.insert(schema.contacts).values({ companyId: co.id, firstName: c.director.firstName, lastName: c.director.lastName, role: c.director.role, phone: it.phone, isPrimary: true });

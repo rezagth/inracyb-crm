@@ -2,7 +2,7 @@ import "server-only";
 import { db, schema } from "@/db";
 import {
   ANNUAIRE_ENDPOINT, PLACES_ENDPOINT, PLACES_FIELDS, buildAnnuaireParams, buildPlacesBody, explainAnnuaireError,
-  normalizeCompany, normalizeSearch, pickPlace, type Candidate, type SearchInput, type SearchPage,
+  matchByName, normalizeCompany, normalizeSearch, pickPlace, type Candidate, type SearchInput, type SearchPage,
 } from "@/lib/prospect-search";
 
 export type Found = Candidate & { inCrm: boolean };
@@ -44,6 +44,13 @@ export async function fetchBySiren(siren: string): Promise<Res<{ company: Candid
   const first = (r.json as { results?: unknown[] } | null)?.results?.[0];
   const company = normalizeCompany(first);
   return { ok: true, company: company && company.siren === siren ? company : null };
+}
+
+/** Retrouve une entreprise saisie sans SIREN par son nom (correspondance stricte : nom identique + lieu). */
+export async function fetchByName(name: string, postalCode: string, city: string): Promise<Res<{ company: Candidate | null }>> {
+  const r = await annuaireGet(new URLSearchParams({ q: name, per_page: "10", etat_administratif: "A" }));
+  if (!r.ok) return r;
+  return { ok: true, company: matchByName(normalizeSearch(r.json).items, name, postalCode, city) };
 }
 
 export async function findPlace(name: string, city: string, postalCode: string): Promise<Res<{ phone: string; website: string } | { phone: ""; website: "" }>> {

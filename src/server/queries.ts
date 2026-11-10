@@ -200,6 +200,8 @@ export async function prospectList() {
       priority: c.priority,
       offer: c.offer,
       lastContact: c.lastContact,
+      amountCents: c.amountCents,
+      siren: c.siren,
       contact: ct ? [ct.firstName, ct.lastName].filter(Boolean).join(" ") : "",
       role: ct?.role ?? "",
       email: ct?.email ?? "",
