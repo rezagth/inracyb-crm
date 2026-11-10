@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { and, eq, gte } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { getProfile, prospectList } from "@/server/queries";
@@ -5,6 +6,7 @@ import { getSettings } from "@/server/core";
 import { brevoConfig, brevoReady } from "@/server/brevo";
 import { addDays, today } from "@/lib/format";
 import { PageHeader } from "@/components/ui";
+import { Icon } from "@/components/icon";
 import { FormButton } from "@/components/mod/record-dialog";
 import { Prospection } from "./prospection";
 
@@ -29,7 +31,15 @@ export default async function ProspectionPage({ searchParams }: { searchParams: 
       <PageHeader
         title="Prospection"
         subtitle="Scripts d'appel, séquences de mails et réponses aux objections, écrits pour chaque prospect."
-        actions={<FormButton form="call" label="Noter un appel" icon="phone" companies={prospects.map((p) => ({ id: p.id, name: p.name }))} />}
+        actions={
+          <>
+            <Link href="/prospection/recherche" className="btn btn-sec">
+              <Icon name="search" />
+              Rechercher des prospects
+            </Link>
+            <FormButton form="call" label="Noter un appel" icon="phone" companies={prospects.map((p) => ({ id: p.id, name: p.name }))} />
+          </>
+        }
       />
       <Prospection
         prospects={prospects}
