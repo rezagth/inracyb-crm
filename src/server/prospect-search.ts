@@ -61,7 +61,7 @@ export async function findPlace(name: string, city: string, postalCode: string):
     if (res.status === 403 || res.status === 401) return { ok: false, error: "Google refuse la clé : vérifie GOOGLE_PLACES_API_KEY et que « Places API (New) » est activée avec la facturation." };
     if (res.status === 429) return { ok: false, error: "Quota Google Places atteint : réessaie plus tard." };
     if (!res.ok) return { ok: false, error: `Google Places a répondu ${res.status}.` };
-    const hit = pickPlace(json, postalCode);
+    const hit = pickPlace(json, postalCode, city);
     return hit ? { ok: true, ...hit } : { ok: true, phone: "", website: "" };
   } catch {
     return { ok: false, error: "Google Places ne répond pas. Réessaie dans un instant." };

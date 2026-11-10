@@ -7,10 +7,13 @@ import { brevoConfig, brevoReady } from "@/server/brevo";
 import { addDays, today } from "@/lib/format";
 import { PageHeader } from "@/components/ui";
 import { Icon } from "@/components/icon";
+import { EnrichAll } from "@/components/enrich-button";
 import { FormButton } from "@/components/mod/record-dialog";
 import { Prospection } from "./prospection";
 
 export const metadata = { title: "Prospection" };
+/** La recherche d'e-mails lit des sites web : on laisse jusqu'à 60 s à chaque action. */
+export const maxDuration = 60;
 
 export default async function ProspectionPage({ searchParams }: { searchParams: Promise<{ co?: string; offer?: string; tab?: string; call?: string }> }) {
   const sp = await searchParams;
@@ -37,6 +40,7 @@ export default async function ProspectionPage({ searchParams }: { searchParams: 
               <Icon name="search" />
               Rechercher des prospects
             </Link>
+            <EnrichAll ids={prospects.filter((p) => !p.email && (p.stage === "qualif" || p.stage === "contacte")).map((p) => p.id)} />
             <FormButton form="call" label="Noter un appel" icon="phone" companies={prospects.map((p) => ({ id: p.id, name: p.name }))} />
           </>
         }

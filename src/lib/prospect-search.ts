@@ -175,13 +175,15 @@ export function buildPlacesBody(name: string, city: string) {
   return { textQuery: `${name} ${city}`.trim(), languageCode: "fr", regionCode: "FR", maxResultCount: 3 };
 }
 
-/** Garde-fou : on n'accepte un résultat que si son adresse contient le code postal du prospect (évite les homonymes). */
-export function pickPlace(json: unknown, postalCode: string): { phone: string; website: string } | null {
+/** Garde-fou : on n'accepte un résultat que si son adresse contient le code postal (ou, à défaut de code postal, la ville) du prospect. */
+export function pickPlace(json: unknown, postalCode: string, city = ""): { phone: string; website: string } | null {
   const places = rec(json).places;
-  if (!Array.isArray(places) || !/^\d{5}$/.test(postalCode)) return null;
+  const cpOk = /^\d{5}$/.test(postalCode);
+  if (!Array.isArray(places) || (!cpOk && !city.trim())) return null;
   for (const p of places) {
     const r = rec(p);
-    if (!str(r.formattedAddress).includes(postalCode)) continue;
+    const addr = str(r.formattedAddress).toLowerCase();
+    if (!(cpOk ? addr.includes(postalCode) : addr.includes(city.trim().toLowerCase()))) continue;
     const phone = str(r.nationalPhoneNumber);
     const website = str(r.websiteUri);
     if (phone || website) return { phone, website };

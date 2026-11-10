@@ -7,9 +7,13 @@ import { invoiceDisplayStatus } from "@/lib/billing";
 import { eur, fd, fdt, initials, today } from "@/lib/format";
 import { Avatar, Badge, Card, EmptyState, PageHeader, toneFor } from "@/components/ui";
 import { Icon, type IconName } from "@/components/icon";
+import { EnrichButton } from "@/components/enrich-button";
 import { CompanyForm } from "../company-form";
 import { ActivityForm, ContactForm, DeleteCompanyButton, DeleteContactButton, StageSelect, TaskForm } from "./forms";
 import { TaskCheck } from "../../taches/task-check";
+
+/** La recherche d'e-mails lit des sites web : on laisse jusqu'à 60 s à chaque action. */
+export const maxDuration = 60;
 
 const TABS = [
   ["activite", "Activité"],
@@ -53,6 +57,7 @@ export default async function CompanyPage({ params, searchParams }: { params: Pr
         actions={
           <>
             <StageSelect id={c.id} stage={c.stage} />
+            <EnrichButton companyId={c.id} />
             <Link href={`/prospection?co=${c.id}&call=1`} className="btn btn-sec">
               <Icon name="phone" />
               Appel guidé

@@ -8,6 +8,7 @@ import { NOT_DO, OFFER_FROM_COMPANY, OFFER_KIT, objections, salut, scripts, type
 import { fd } from "@/lib/format";
 import { Avatar, toneFor } from "@/components/ui";
 import { Icon } from "@/components/icon";
+import { EnrichButton } from "@/components/enrich-button";
 import { useToast } from "@/components/mod/toast";
 import { initials } from "@/lib/format";
 
@@ -347,7 +348,10 @@ export function Prospection({
           <article className="card rise flex min-w-0 flex-[999_1_520px] flex-col gap-3.5 p-5" style={{ animationDelay: "60ms" }}>
             <div className="grid grid-cols-[70px_minmax(0,1fr)] gap-x-3 gap-y-2 border-b border-border-subtle pb-3 text-[13px]">
               <span className="text-subtle-fg">À</span>
-              <span>{co.email ? `${sal?.name} <${co.email}>` : "[e-mail du prospect à compléter]"}</span>
+              <span className="flex flex-wrap items-center gap-2">
+                {co.email ? `${sal?.name} <${co.email}>` : "[e-mail du prospect à compléter]"}
+                {!co.email && <EnrichButton companyId={co.id} label="Chercher l'e-mail" className="btn btn-sec btn-sm" />}
+              </span>
               <span className="text-subtle-fg">Objet</span>
               <span className="font-semibold">{cm.subject}</span>
               <span className="text-subtle-fg">Envoi</span>
