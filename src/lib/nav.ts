@@ -63,4 +63,4 @@ export const NAV: { label: string; items: { key: string; href: string; label: st
 ];
 
 /** Pages déjà construites (les autres sont masquées tant qu'elles ne sont pas prêtes). */
-export const BUILT = new Set(["dashboard", "prospection", "pipeline", "entreprises", "contacts", "appels", "rdv", "devis", "partenaires", "clients", "factures", "catalogue", "taches", "parametres", "contrats", "missions", "temps", "support", "plans", "audits", "incidents", "depenses", "tresorerie", "integrations", "documents", "savoir", "marketing", "conformite", "automatisations", "rapports", "rentabilite", "activite"]);
+export const BUILT = new Set(["dashboard", "prospection", "campagnes", "pipeline", "entreprises", "contacts", "appels", "rdv", "devis", "partenaires", "clients", "factures", "catalogue", "taches", "parametres", "contrats", "missions", "temps", "support", "plans", "audits", "incidents", "depenses", "tresorerie", "integrations", "documents", "savoir", "marketing", "conformite", "automatisations", "rapports", "rentabilite", "activite"]);
