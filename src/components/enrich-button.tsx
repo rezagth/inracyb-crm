@@ -46,13 +46,16 @@ export function EnrichAll({ ids, label = "Compléter les fiches" }: { ids: strin
       onClick={() =>
         start(async () => {
           let found = 0;
+          const reasons: string[] = [];
           setDone(0);
           for (const id of batch) {
             const r = await completeCompanyAction(id);
             if (r.ok && r.found) found++;
+            else reasons.push(r.ok ? r.message : r.error);
             setDone((n) => n + 1);
           }
-          toast(`${found} entreprise(s) complétée(s) sur ${batch.length} cherchée(s)`);
+          // Sans explication, « 0 complétée » ne dit pas quoi corriger : on affiche la première raison rencontrée.
+          toast(`${found} entreprise(s) complétée(s) sur ${batch.length}${reasons.length ? ` — ${reasons[0]}` : ""}`);
           router.refresh();
         })
       }

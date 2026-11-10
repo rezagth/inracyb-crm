@@ -9,7 +9,7 @@ import { hostOf, pickBestEmail, siteFromNotes } from "@/lib/contact-extract";
 import { estimateAmountCents } from "@/lib/estimate";
 import { eur } from "@/lib/format";
 import { logEvent } from "../core";
-import { crawlSite } from "../enrich";
+import { crawlSite, type Crawl } from "../enrich";
 import { fetchByName, fetchBySiren, findPlace } from "../prospect-search";
 import { getProfile } from "../queries";
 
@@ -40,7 +40,7 @@ export async function enrichCompanyAction(companyId: string): Promise<R> {
     }
   }
 
-  const crawl = site ? await crawlSite(site) : { emails: [], phones: [], pages: 0 };
+  const crawl: Crawl = site ? await crawlSite(site) : { emails: [], phones: [], pages: 0 };
   const { best, others } = pickBestEmail(crawl.emails, hostOf(site), ct?.lastName || ct?.firstName || "");
   const phone = placePhone ? placePhone.replace(/\s+/g, " ") : crawl.phones[0] ?? "";
 
@@ -69,7 +69,7 @@ export async function enrichCompanyAction(companyId: string): Promise<R> {
   if (found) return { ok: true, found, message: `${c.name} : ${parts.join(" · ")} ajouté` };
   if (ct?.email && ct?.phone) return { ok: true, found, message: `${c.name} a déjà un e-mail et un téléphone.` };
   if (!site) return { ok: true, found, message: `${c.name} : aucun site web trouvé. Ajoute « Site web : https://… » dans ses notes puis relance.` };
-  if (!crawl.pages) return { ok: true, found, message: `${c.name} : le site ${hostOf(site)} n'a pas pu être lu.` };
+  if (!crawl.pages) return { ok: true, found, message: `${c.name} : le site ${hostOf(site)} n'a pas pu être lu${crawl.error ? ` : ${crawl.error}` : ""}.` };
   return { ok: true, found, message: `${c.name} : aucun e-mail publié sur ${hostOf(site)}.` };
 }
 
