@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
-import { endCallAction, markMailSentAction } from "@/server/actions/prospection";
+import { endCallAction, markMailSentAction, sendSequenceMailAction } from "@/server/actions/prospection";
 import { NOT_DO, OFFER_FROM_COMPANY, OFFER_KIT, objections, salut, scripts, type OfferKey, type Profile } from "@/lib/prospection";
 import { fd } from "@/lib/format";
 import { Avatar, toneFor } from "@/components/ui";
@@ -36,6 +36,9 @@ export function Prospection({
   goals,
   counts,
   sends,
+  mailReady,
+  dailyLimit,
+  fromEmail,
   initial,
 }: {
   prospects: P[];
@@ -45,6 +48,9 @@ export function Prospection({
   goals: { calls: number; mails: number; rdv: number };
   counts: { calls: number; mails: number; rdvWeek: number };
   sends: Send[];
+  mailReady: boolean;
+  dailyLimit: number;
+  fromEmail: string;
   initial: { co?: string; offer?: string; tab?: string; call?: boolean };
 }) {
   const router = useRouter();
@@ -116,6 +122,18 @@ export function Prospection({
     if (!co || !cm) return;
     start(async () => {
       const r = await markMailSentAction(co.id, offer, mIdx, cm.subject);
+      if (!r.ok) return toast(r.error);
+      toast(r.message);
+      if (r.nextStep !== undefined) setMailIdx(r.nextStep);
+      router.refresh();
+    });
+  }
+
+  function sendNow() {
+    if (!co || !cm) return;
+    if (!window.confirm(`Envoyer le mail ${cm.k} à ${co.email} depuis ${fromEmail} ?`)) return;
+    start(async () => {
+      const r = await sendSequenceMailAction(co.id, offer, mIdx, cm.subject, cm.body);
       if (!r.ok) return toast(r.error);
       toast(r.message);
       if (r.nextStep !== undefined) setMailIdx(r.nextStep);
@@ -346,11 +364,23 @@ export function Prospection({
                 Ouvrir dans ma messagerie
               </a>
               <span className="flex-1" />
-              <button type="button" className="btn btn-pri" disabled={pending} onClick={markSent}>
+              <button type="button" className="btn btn-sec" disabled={pending} onClick={markSent}>
                 <Icon name="check" />
                 {sent[mIdx] ? "Déjà envoyé · marquer à nouveau" : "Marquer comme envoyé"}
               </button>
+              <button
+                type="button"
+                className="btn btn-pri"
+                disabled={pending || !mailReady || !co.email || !!sent[mIdx]}
+                title={!mailReady ? "Brevo n'est pas configuré (BREVO_API_KEY)" : !co.email ? "Ajoute l'e-mail du contact principal" : sent[mIdx] ? "Cette étape est déjà envoyée" : `Envoi depuis ${fromEmail}`}
+                onClick={sendNow}
+              >
+                <Icon name="mail" />
+                Envoyer via Brevo
+              </button>
             </div>
+            {!mailReady && <p className="tip">Envoi direct désactivé : ajoute BREVO_API_KEY dans .env pour envoyer depuis le CRM.</p>}
+            {mailReady && <p className="tip">Envoi direct depuis {fromEmail} · plafond {dailyLimit} mails par jour · les réponses arrivent dans ta boîte.</p>}
             <p className="tip">Conseil : {cm.tip}</p>
           </article>
         </section>

@@ -42,3 +42,15 @@ Retire ensuite `DATABASE_URL` de ton `.env` ou remets-y l'URL d'une base de **d�
 ## Limites connues
 - Les automatisations quotidiennes (facturation des contrats, relances, lien StratCyber) se déclenchent à la première ouverture du CRM de la journée, pas à heure fixe. Pour une exécution sans ouverture, il faudra une tâche planifiée Vercel (non ajoutée).
 - Sur Vercel, `DATABASE_URL` doit être l'URL poolée de Neon, sinon les connexions s'épuisent.
+
+## Envoi de mails depuis le CRM (Brevo)
+
+Dans Prospection > Séquence mails, le bouton « Envoyer via Brevo » envoie le mail depuis contact@infracyb.fr, le note dans le journal et planifie la relance suivante.
+
+Variables à ajouter dans `.env` en local **et** dans Vercel (Settings > Environment Variables), puis redéployer :
+
+- `BREVO_API_KEY` : clé créée dans Brevo (SMTP et API > Clés API).
+- `MAIL_FROM_EMAIL` (défaut `contact@infracyb.fr`), `MAIL_FROM_NAME` (défaut `InfraCyb`), `MAIL_REPLY_TO` (défaut : l'expéditeur).
+- `MAIL_DAILY_LIMIT` : plafond d'envois par jour depuis le CRM (défaut 10, maximum 300).
+
+Prérequis côté Brevo : domaine infracyb.fr authentifié, expéditeur contact@infracyb.fr validé, téléphone vérifié.

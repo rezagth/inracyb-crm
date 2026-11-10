@@ -2,6 +2,7 @@ import { and, eq, gte } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { getProfile, prospectList } from "@/server/queries";
 import { getSettings } from "@/server/core";
+import { brevoConfig, brevoReady } from "@/server/brevo";
 import { addDays, today } from "@/lib/format";
 import { PageHeader } from "@/components/ui";
 import { FormButton } from "@/components/mod/record-dialog";
@@ -38,6 +39,9 @@ export default async function ProspectionPage({ searchParams }: { searchParams: 
         goals={{ calls: s.goalCalls, mails: s.goalMails, rdv: s.goalRdv }}
         counts={counts}
         sends={sends}
+        mailReady={brevoReady()}
+        dailyLimit={brevoConfig().dailyLimit}
+        fromEmail={brevoConfig().fromEmail}
         initial={{ co: sp.co, offer: sp.offer, tab: sp.tab, call: sp.call === "1" }}
       />
     </>
