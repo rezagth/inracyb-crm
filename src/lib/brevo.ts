@@ -13,6 +13,8 @@ export type MailInput = {
   text: string;
   replyTo?: string;
   tags?: string[];
+  /** En-têtes personnalisés, par exemple List-Unsubscribe pour la désinscription en un clic. */
+  headers?: Record<string, string>;
 };
 
 /** Corps JSON attendu par Brevo : texte brut uniquement (meilleure délivrabilité pour de la prospection 1 à 1). */
@@ -24,6 +26,7 @@ export function buildBrevoPayload(i: MailInput) {
     subject: i.subject,
     textContent: i.text,
     ...(i.tags?.length ? { tags: i.tags } : {}),
+    ...(i.headers && Object.keys(i.headers).length ? { headers: i.headers } : {}),
   };
 }
 

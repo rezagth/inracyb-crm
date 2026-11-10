@@ -15,6 +15,7 @@ export const NAV: { label: string; items: { key: string; href: string; label: st
     label: "Commercial",
     items: [
       { key: "prospection", href: "/prospection", label: "Prospection", icon: "p_prospection" },
+      { key: "campagnes", href: "/campagnes", label: "Campagnes", icon: "p_prospection" },
       { key: "pipeline", href: "/pipeline", label: "Pipeline", icon: "p_pipeline" },
       { key: "entreprises", href: "/entreprises", label: "Entreprises", icon: "p_entreprises" },
       { key: "contacts", href: "/contacts", label: "Contacts", icon: "p_contacts" },

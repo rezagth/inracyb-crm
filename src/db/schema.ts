@@ -35,7 +35,7 @@ export const settings = pgTable("settings", {
   address: text("address").notNull().default(""),
   email: text("email").notNull().default("infracyb@gmail.com"),
   phone: text("phone").notNull().default(""),
-  website: text("website").notNull().default("infracyb.vercel.app"),
+  website: text("website").notNull().default("infracyb.fr"),
   iban: text("iban").notNull().default(""),
   payLink: text("pay_link").notNull().default(""),
   calUrl: text("cal_url").notNull().default(""),
@@ -280,6 +280,40 @@ export const mailSends = pgTable(
   { id: id(), companyId: coRef(), offer: text("offer").notNull(), step: integer("step").notNull(), subject: text("subject").notNull().default(""), sentOn: text("sent_on").notNull(), createdAt: createdAt() },
   (t) => [index("mail_sends_idx").on(t.companyId, t.offer)],
 );
+
+/** Campagnes d'envoi en masse : une offre, une séquence J0 / J+3 / J+7 / J+14, des entreprises. status : active | pause | terminee */
+export const mailCampaigns = pgTable("mail_campaigns", {
+  id: id(),
+  name: text("name").notNull(),
+  offer: text("offer").notNull(),
+  status: text("status").notNull().default("active"),
+  createdAt: createdAt(),
+});
+
+/** Une entreprise dans une campagne. status : en_cours | termine | arrete (stopReason dit pourquoi). nextDue = date du prochain mail. */
+export const mailCampaignItems = pgTable(
+  "mail_campaign_items",
+  {
+    id: id(),
+    campaignId: text("campaign_id").notNull().references(() => mailCampaigns.id, { onDelete: "cascade" }),
+    companyId: text("company_id").notNull().references(() => companies.id, { onDelete: "cascade" }),
+    nextStep: integer("next_step").notNull().default(0),
+    nextDue: text("next_due").notNull(),
+    status: text("status").notNull().default("en_cours"),
+    stopReason: text("stop_reason").notNull().default(""),
+    lastError: text("last_error").notNull().default(""),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("mail_campaign_items_uq").on(t.campaignId, t.companyId), index("mail_campaign_items_due_idx").on(t.status, t.nextDue)],
+);
+
+/** Adresses qui ne veulent plus être contactées (en minuscules). Aucun envoi de campagne n'est fait vers elles. */
+export const mailOptouts = pgTable("mail_optouts", {
+  id: id(),
+  email: text("email").notNull().unique(),
+  source: text("source").notNull().default("lien"),
+  createdAt: createdAt(),
+});
 
 export const partners = pgTable("partners", {
   id: id(),

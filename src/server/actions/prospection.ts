@@ -11,6 +11,7 @@ import { OFFER_KIT, nextBiz, type OfferKey } from "@/lib/prospection";
 import { EMAIL_RE } from "@/lib/brevo";
 import { brevoConfig, sendBrevoMail } from "../brevo";
 import { logEvent, type DbOrTx } from "../core";
+import { optoutSet } from "../campaigns";
 
 type R = { ok: true; message: string; nextStep?: number } | { ok: false; error: string };
 const offerZ = z.enum(["audit", "ciso", "ia"]);
@@ -118,6 +119,7 @@ export async function sendSequenceMailAction(companyId: string, offer: string, s
   const email = ct?.email.trim() ?? "";
   if (!EMAIL_RE.test(email)) return { ok: false, error: "Ajoute d'abord une adresse e-mail valide au contact principal de cette entreprise." };
 
+  if ((await optoutSet()).has(email.toLowerCase())) return { ok: false, error: `${c.name} s'est désinscrite : aucun mail ne doit lui être envoyé.` };
   // Garde-fous : jamais deux fois la même étape, et un plafond par jour pour protéger la réputation du domaine.
   const already = (await db.select({ id: schema.mailSends.id }).from(schema.mailSends).where(and(eq(schema.mailSends.companyId, companyId), eq(schema.mailSends.offer, of.data), eq(schema.mailSends.step, st.data))).limit(1))[0];
   if (already) return { ok: false, error: `Le mail ${STEPS[st.data].k} a déjà été envoyé à ${c.name}. Rien n'a été renvoyé.` };

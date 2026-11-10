@@ -1,7 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { SESSION_COOKIE, verifySession } from "@/lib/session";
 
-const PUBLIC = ["/login", "/setup"];
+/** /api/desabonnement : lien de désinscription des prospects ; /api/cron : appelé par Vercel, protégé par CRON_SECRET. */
+const PUBLIC = ["/login", "/setup", "/api/desabonnement", "/api/cron"];
 
 /** Première barrière : toute page hors connexion exige un jeton de session valide.
  *  La vérification complète (utilisateur existant, version de session) est refaite côté serveur. */

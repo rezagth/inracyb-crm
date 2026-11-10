@@ -38,5 +38,8 @@ async function main() {
 }
 main().catch((e) => {
   console.error("✗ Échec de la migration :", e instanceof Error ? e.message : e);
+  // Drizzle n'affiche que « Failed query » : la vraie cause (connexion refusée, droits, mot de passe…) est dans « cause ».
+  const cause = e instanceof Error ? (e as { cause?: unknown }).cause : null;
+  if (cause) console.error("  Cause :", cause instanceof Error ? `${cause.name}: ${cause.message}${(cause as { code?: string }).code ? ` (code ${(cause as { code?: string }).code})` : ""}` : cause);
   process.exit(1);
 });
