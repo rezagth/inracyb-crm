@@ -120,7 +120,7 @@ export const DEFAULTS = {
    "category": "Site web",
    "due": "",
    "done": false,
-   "note": "Sur infracyb.vercel.app."
+   "note": "Sur infracyb.fr."
   },
   {
    "title": "Sécuriser tes propres outils",

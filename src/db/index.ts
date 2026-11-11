@@ -14,6 +14,8 @@ function open(): Db {
   if (!url) throw new Error("DATABASE_URL manquante : voir .env.example");
   if (!/^postgres(ql)?:\/\//.test(url)) throw new Error("DATABASE_URL doit être une URL Postgres (postgres://…). L'ancienne base SQLite se copie avec `npm run db:copy-sqlite`.");
   const pool = new Pool({ connectionString: url, max: process.env.VERCEL ? 3 : 10, idleTimeoutMillis: 10_000, connectionTimeoutMillis: 10_000 });
+  // Neon ferme les connexions inactives : sans ce gestionnaire, l'erreur n'est pas interceptée et fait planter le processus.
+  pool.on("error", (e) => console.error("[db] connexion inactive fermée :", e.message));
   return drizzle(pool, { schema });
 }
 
