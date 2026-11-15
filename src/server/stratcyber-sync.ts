@@ -9,7 +9,7 @@ import { paymentStatusOf, signPayload } from "@/lib/stratcyber-link";
  * Sens unique CRM → StratCyber, jamais l'inverse. N'envoie que : identifiant, nom, secteur, statut.
  * Sans STRATCYBER_URL et STRATCYBER_WEBHOOK_SECRET dans .env, ne fait rien. Idempotent : peut être relancé.
  */
-async function post(url: string, secret: string, body: object): Promise<boolean> {
+export async function post(url: string, secret: string, body: object): Promise<boolean> {
   const raw = JSON.stringify(body);
   const ts = String(Math.floor(Date.now() / 1000));
   try {
@@ -56,4 +56,17 @@ export async function syncStratcyber(): Promise<{ ok: boolean; message: string }
     else failed++;
   }
   return failed ? { ok: false, message: `${sent} client(s) envoyé(s), ${failed} en échec (StratCyber injoignable ou secret différent).` } : { ok: true, message: `${sent} client(s) synchronisé(s) avec StratCyber.` };
+}
+
+/** Envoie un événement signé à StratCyber (ex. client.upsert puis contract.sent). Renvoie false si non configuré ou en échec. */
+export async function postToStratcyber(body: { event: string; crmId: string; name?: string; sector?: string } & Record<string, unknown>): Promise<boolean> {
+  const base = process.env.STRATCYBER_URL?.replace(/\/$/, "");
+  const secret = process.env.STRATCYBER_WEBHOOK_SECRET;
+  if (!base || !secret) return false;
+  const url = `${base}/api/integrations/crm`;
+  // Le client doit exister côté StratCyber avant de recevoir la trace.
+  if (body.name && !(await post(url, secret, { event: "client.upsert", crmId: body.crmId, name: body.name, sector: body.sector }))) return false;
+  const { name: _n, sector: _s, ...rest } = body;
+  void _n; void _s;
+  return post(url, secret, rest);
 }

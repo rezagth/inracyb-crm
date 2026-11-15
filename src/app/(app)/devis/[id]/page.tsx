@@ -37,7 +37,12 @@ export default async function QuotePage({ params }: { params: Promise<{ id: stri
             </Link>
           </span>
         }
-        actions={<PrintButton />}
+        actions={
+          <span className="flex gap-2">
+            <Link className="btn btn-sec" href={`/devis/${q.id}/contrat`}>Contrat de mission</Link>
+            <PrintButton />
+          </span>
+        }
       />
       <div className="grid gap-4 xl:grid-cols-[1fr_300px]">
         <DocSheet
