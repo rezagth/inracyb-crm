@@ -9,7 +9,7 @@ import { exclusionOf, EXCLUSION_LABEL, type Exclusion } from "@/lib/campaign";
 import { today } from "@/lib/format";
 import { prospectList } from "../queries";
 import { logEvent } from "../core";
-import { optoutSet, recordOptout, runCampaigns } from "../campaigns";
+import { optoutSet, recordOptout, recordRun, runCampaigns } from "../campaigns";
 
 type R = { ok: true; message: string } | { ok: false; error: string };
 const offerZ = z.enum(["audit", "ciso", "ia"]);
@@ -58,6 +58,7 @@ export async function createCampaignAction(name: string, offer: string, companyI
 export async function runCampaignsNowAction(): Promise<R> {
   await requireUser();
   const r = await runCampaigns();
+  await recordRun("manuel", r);
   revalidatePath("/campagnes");
   revalidatePath("/", "layout");
   return r.ok ? { ok: true, message: r.message } : { ok: false, error: r.message };

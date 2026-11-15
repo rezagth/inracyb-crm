@@ -12,11 +12,13 @@ import { fd } from "@/lib/format";
 
 type P = { id: string; name: string; sector: string; email: string; why: string | null };
 type Item = { id: string; company: string; step: number; due: string; status: string; reason: string; error: string };
-type C = { id: string; name: string; offer: string; status: string; items: Item[] };
+type Stats = { contacted: number; mails: number; replies: number; bounces: number; spam: number; optouts: number };
+type Health = { missing: boolean; lastRun: { at: string; source: string; ok: boolean; message: string } | null; events: Record<string, number> };
+type C = { id: string; name: string; offer: string; status: string; stats: Stats; items: Item[] };
 
 const STATUS: Record<string, string> = { active: "En cours", pause: "En pause", terminee: "Terminée" };
 
-export function Campagnes({ prospects, offers, ready, urlOk, dailyLimit, sentToday, fromEmail, campaigns }: { prospects: P[]; offers: OfferKey[]; ready: boolean; urlOk: boolean; dailyLimit: number; sentToday: number; fromEmail: string; campaigns: C[] }) {
+export function Campagnes({ prospects, offers, ready, urlOk, dailyLimit, sentToday, fromEmail, health, campaigns }: { prospects: P[]; offers: OfferKey[]; ready: boolean; urlOk: boolean; dailyLimit: number; sentToday: number; fromEmail: string; health: Health; campaigns: C[] }) {
   const router = useRouter();
   const toast = useToast();
   const [pending, start] = useTransition();
@@ -50,6 +52,28 @@ export function Campagnes({ prospects, offers, ready, urlOk, dailyLimit, sentTod
           Les envois sont bloqués tant que ce n&apos;est pas fait.
         </p>
       )}
+      <Card title="Santé des envois">
+        <div className="flex flex-col gap-2 p-5 text-[13px]">
+          {health.missing ? (
+            <p className="tip">Suivi des rebonds indisponible : colle le fichier drizzle-manuel-suivi.sql dans Neon (SQL Editor), puis recharge la page.</p>
+          ) : (
+            <>
+              {health.lastRun ? (
+                <p className={health.lastRun.ok ? "text-muted-fg" : "tip"}>
+                  Dernier déclenchement ({health.lastRun.source === "cron" ? "automatique" : "manuel"}) : {new Date(health.lastRun.at).toLocaleString("fr-FR", { timeZone: "Europe/Paris", dateStyle: "short", timeStyle: "short" })} · {health.lastRun.ok ? "OK" : "ÉCHEC"} · {health.lastRun.message}
+                </p>
+              ) : (
+                <p className="text-muted-fg">Aucun déclenchement enregistré pour l&apos;instant.</p>
+              )}
+              <p className="text-muted-fg">
+                7 derniers jours : {health.events.rebond ?? 0} rebond(s) · {health.events.spam ?? 0} plainte(s) spam · {(health.events.bloque ?? 0) + (health.events.invalide ?? 0)} adresse(s) bloquée(s) ou invalide(s) · {health.events.desinscrit ?? 0} désinscription(s) Brevo
+                {Object.keys(health.events).length === 0 ? " (rien reçu : vérifie que le webhook Brevo est configuré)" : ""}
+              </p>
+            </>
+          )}
+        </div>
+      </Card>
+
       <Card title="Nouvelle campagne" actions={<span className="text-xs text-subtle-fg">Envoi depuis {fromEmail} · {sentToday}/{dailyLimit} mails aujourd&apos;hui</span>}>
         <div className="flex flex-col gap-4 p-5">
           <div className="flex flex-wrap gap-3">
@@ -124,6 +148,7 @@ export function Campagnes({ prospects, offers, ready, urlOk, dailyLimit, sentTod
                     <strong>{c.name}</strong>
                     <span className="text-xs text-muted-fg">{OFFER_KIT[c.offer as OfferKey]?.l ?? c.offer} · {STATUS[c.status] ?? c.status}</span>
                     <span className="text-xs text-muted-fg">{n("en_cours")} en cours · {n("termine")} terminée(s) · {n("arrete")} arrêtée(s){c.items.some((i) => i.error) ? ` · ${c.items.filter((i) => i.error).length} en erreur` : ""}</span>
+                    <span className="text-xs text-muted-fg">{c.stats.contacted} contactée(s) · {c.stats.mails} mail(s) · {c.stats.replies} réponse(s) · {c.stats.bounces} rebond(s){c.stats.spam ? ` · ${c.stats.spam} plainte(s) spam` : ""}{c.stats.optouts ? ` · ${c.stats.optouts} désinscrit(s)` : ""}</span>
                   </summary>
                   <div className="mt-3 flex flex-wrap gap-2">
                     {c.status === "active" && <button type="button" className="btn btn-sec btn-sm" disabled={pending} onClick={() => run(() => setCampaignStatusAction(c.id, "pause"))}>Mettre en pause</button>}

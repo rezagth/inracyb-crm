@@ -3,7 +3,7 @@ import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { stageOf, stageRank } from "@/lib/constants";
 import { EMAIL_RE } from "@/lib/brevo";
-import { makeOptoutToken, nextDueAfterSend, pickDue, STEP_LABELS, withUnsubscribeFooter } from "@/lib/campaign";
+import { makeOptoutToken, nextDueAfterSend, pickDue, runFailed, STEP_LABELS, withUnsubscribeFooter } from "@/lib/campaign";
 import { today } from "@/lib/format";
 import { OFFER_KIT, scripts, type OfferKey } from "@/lib/prospection";
 import { brevoConfig, sendBrevoMail } from "./brevo";
@@ -26,7 +26,7 @@ export function optoutLink(email: string): string | null {
 }
 
 /** Enregistre une désinscription et arrête tout envoi en cours vers cette adresse. */
-export async function recordOptout(email: string, source: string): Promise<void> {
+export async function recordOptout(email: string, source: string, reason = "Désinscrit"): Promise<void> {
   const e = email.trim().toLowerCase();
   if (!EMAIL_RE.test(e)) return;
   await db.insert(schema.mailOptouts).values({ email: e, source }).onConflictDoNothing();
@@ -34,9 +34,9 @@ export async function recordOptout(email: string, source: string): Promise<void>
   for (const { companyId } of cts) {
     await db
       .update(schema.mailCampaignItems)
-      .set({ status: "arrete", stopReason: "Désinscrit" })
+      .set({ status: "arrete", stopReason: reason })
       .where(and(eq(schema.mailCampaignItems.companyId, companyId), eq(schema.mailCampaignItems.status, "en_cours")));
-    await logEvent(db, companyId, "note", `Désinscription demandée (${source}) : ${e}. Plus aucun mail de campagne.`);
+    await logEvent(db, companyId, "note", reason === "Désinscrit" ? `Désinscription demandée (${source}) : ${e}. Plus aucun mail de campagne.` : `Adresse écartée (${reason}) : ${e}. Plus aucun mail de campagne.`);
   }
 }
 
@@ -45,6 +45,17 @@ export async function optoutSet(): Promise<Set<string>> {
 }
 
 export type RunSummary = { ok: boolean; sent: number; stopped: number; errors: number; waiting: number; message: string };
+
+export { runFailed };
+
+/** Garde une trace du déclenchement (visible sur la page Campagnes). Ne fait jamais échouer l'envoi si le journal est indisponible. */
+export async function recordRun(source: "cron" | "manuel", r: RunSummary): Promise<void> {
+  try {
+    await db.insert(schema.mailRuns).values({ source, ok: !runFailed(r), sent: r.sent, stopped: r.stopped, errors: r.errors, waiting: r.waiting, message: r.message.slice(0, 500) });
+  } catch (e) {
+    console.error("campagne : journal du déclenchement non enregistré", e);
+  }
+}
 
 /**
  * Envoie les mails de campagne arrivés à échéance, dans la limite du plafond du jour (MAIL_DAILY_LIMIT, tous envois confondus).
@@ -76,6 +87,7 @@ export async function runCampaigns(opts: { campaignId?: string; budgetMs?: numbe
   const optouts = await optoutSet();
   const profile = await getProfile();
   let sent = 0, stopped = 0, errors = 0, consecutive = 0;
+  let firstError = "";
   const stop = async (itemId: string, reason: string) => {
     await db.update(schema.mailCampaignItems).set({ status: "arrete", stopReason: reason, lastError: "" }).where(eq(schema.mailCampaignItems.id, itemId));
     stopped++;
@@ -129,6 +141,7 @@ export async function runCampaigns(opts: { campaignId?: string; budgetMs?: numbe
       await db.update(schema.mailCampaignItems).set({ lastError: res.error.slice(0, 300) }).where(eq(schema.mailCampaignItems.id, item.id));
       errors++;
       consecutive++;
+      if (!firstError) firstError = res.error;
       continue;
     }
     consecutive = 0;
@@ -142,6 +155,6 @@ export async function runCampaigns(opts: { campaignId?: string; budgetMs?: numbe
   }
 
   const waiting = Math.max(0, dueAll - sent - stopped);
-  const parts = [`${sent} mail(s) envoyé(s)`, stopped ? `${stopped} arrêté(s)` : "", errors ? `${errors} en erreur` : "", waiting ? `${waiting} en attente (plafond ou délai)` : ""].filter(Boolean);
+  const parts = [`${sent} mail(s) envoyé(s)`, stopped ? `${stopped} arrêté(s)` : "", errors ? `${errors} en erreur` : "", waiting ? `${waiting} en attente (plafond ou délai)` : "", firstError ? `Erreur : ${firstError}` : ""].filter(Boolean);
   return { ok: true, sent, stopped, errors, waiting, message: parts.join(" · ") };
 }

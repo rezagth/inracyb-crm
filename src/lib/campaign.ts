@@ -79,3 +79,8 @@ export function readOptoutToken(secret: string, token: string): string | null {
 export function withUnsubscribeFooter(body: string, url: string): string {
   return body + "\n\nSe désinscrire en un clic : " + url;
 }
+
+/** Un déclenchement est un échec s'il n'a pas pu démarrer, ou si tout ce qui devait partir a échoué. */
+export function runFailed(r: { ok: boolean; sent: number; errors: number }): boolean {
+  return !r.ok || (r.errors > 0 && r.sent === 0);
+}

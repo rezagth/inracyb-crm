@@ -33,7 +33,9 @@ export function buildBrevoPayload(i: MailInput) {
 /** Message d'erreur lisible, sans jamais exposer la clé API. */
 export function explainBrevoError(status: number, body: unknown): string {
   const msg = body && typeof body === "object" && "message" in body ? String((body as { message: unknown }).message) : "";
-  if (status === 401) return "Clé API Brevo refusée : vérifie BREVO_API_KEY.";
+  const detail = msg ? ` (Brevo : ${msg.slice(0, 200)})` : "";
+  if (/unrecogni[sz]ed ip|authori[sz]ed.?ip|ip address/i.test(msg)) return `Brevo bloque l'adresse IP du CRM : désactive le blocage des IP inconnues dans Brevo (Sécurité, IPs autorisées).${detail}`;
+  if (status === 401) return `Brevo refuse la clé API : vérifie BREVO_API_KEY (dans Vercel aussi) et qu'elle n'a pas été supprimée.${detail}`;
   if (status === 400 && /sender/i.test(msg)) return "Brevo refuse l'expéditeur : valide contact@infracyb.fr dans Brevo (Expéditeurs) et authentifie le domaine.";
   if (status === 402 || status === 403) return `Brevo a refusé l'envoi${msg ? " : " + msg : ""}. Vérifie le compte (téléphone à valider, quota, activation).`;
   if (status === 429) return "Brevo limite le débit : réessaie dans une minute.";

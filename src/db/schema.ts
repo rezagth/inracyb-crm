@@ -315,6 +315,32 @@ export const mailOptouts = pgTable("mail_optouts", {
   createdAt: createdAt(),
 });
 
+/** Événements de délivrabilité reçus de Brevo (rebond, plainte spam, blocage, adresse invalide, désinscription). */
+export const mailEvents = pgTable(
+  "mail_events",
+  {
+    id: id(),
+    email: text("email").notNull(),
+    type: text("type").notNull(),
+    detail: text("detail").notNull().default(""),
+    createdAt: createdAt(),
+  },
+  (t) => [index("mail_events_email_idx").on(t.email), index("mail_events_type_idx").on(t.type, t.createdAt)],
+);
+
+/** Journal des déclenchements de campagne (quotidien automatique ou manuel) : permet de voir un échec sans ouvrir les logs Vercel. */
+export const mailRuns = pgTable("mail_runs", {
+  id: id(),
+  source: text("source").notNull().default("cron"),
+  ok: boolean("ok").notNull().default(true),
+  sent: integer("sent").notNull().default(0),
+  stopped: integer("stopped").notNull().default(0),
+  errors: integer("errors").notNull().default(0),
+  waiting: integer("waiting").notNull().default(0),
+  message: text("message").notNull().default(""),
+  createdAt: createdAt(),
+});
+
 export const partners = pgTable("partners", {
   id: id(),
   name: text("name").notNull(),
