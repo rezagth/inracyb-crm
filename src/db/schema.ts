@@ -290,6 +290,8 @@ export const mailCampaigns = pgTable("mail_campaigns", {
   offer: text("offer").notNull(),
   /** Segment visé (campagnes diagnostic) : editeurs | cabinets ; "" pour les autres offres. Choisit le texte des mails et sert au bilan. */
   segment: text("segment").notNull().default(""),
+  /** true : campagne permanente tenue par l'alimentation automatique (une par service et par segment). */
+  auto: boolean("auto").notNull().default(false),
   status: text("status").notNull().default("active"),
   createdAt: createdAt(),
 });
@@ -363,6 +365,64 @@ export const companyDiagnostics = pgTable(
   },
   (t) => [index("company_diagnostics_company_idx").on(t.companyId, t.createdAt), index("company_diagnostics_status_idx").on(t.status)],
 );
+
+/** Réglages de l'alimentation automatique (une seule ligne, id = 1). Arrêtée tant que tu ne l'as pas mise en marche. */
+export const feedSettings = pgTable("feed_settings", {
+  id: integer("id").primaryKey(),
+  /** interrupteur global */
+  enabled: boolean("enabled").notNull().default(false),
+  /** services alimentés : le diagnostic par défaut ; l'audit seulement si tu l'actives */
+  feedDiagnostic: boolean("feed_diagnostic").notNull().default(true),
+  feedAudit: boolean("feed_audit").notNull().default(false),
+  /** départements ciblés, séparés par des virgules ("" = France entière) */
+  departements: text("departements").notNull().default(""),
+  /** tranches d'effectif ciblées (codes Insee, séparés par des virgules) */
+  effectifs: text("effectifs").notNull().default("02,03,11,12"),
+  /** entreprises importées au plus par jour et par segment */
+  importPerSegment: integer("import_per_segment").notNull().default(30),
+  /** requêtes Google Places au plus par jour */
+  placesDaily: integer("places_daily").notNull().default(30),
+  placesDay: text("places_day").notNull().default(""),
+  placesUsed: integer("places_used").notNull().default(0),
+  /** où la recherche de chaque segment s'est arrêtée (JSON) */
+  cursors: text("cursors").notNull().default("{}"),
+});
+
+/** Parcours d'une entreprise importée par l'alimentation. stage : a_completer | a_diagnostiquer | a_inscrire | inscrit | ecarte. */
+export const feedItems = pgTable(
+  "feed_items",
+  {
+    id: id(),
+    companyId: text("company_id").notNull().references(() => companies.id, { onDelete: "cascade" }),
+    segment: text("segment").notNull(),
+    stage: text("stage").notNull().default("a_completer"),
+    /** pourquoi l'entreprise est écartée ou attend */
+    reason: text("reason").notNull().default(""),
+    /** service de la campagne où elle est inscrite */
+    service: text("service").notNull().default(""),
+    tries: integer("tries").notNull().default(0),
+    importedOn: text("imported_on").notNull(),
+    /** dernier changement d'étape (AAAA-MM-JJ) */
+    movedOn: text("moved_on").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("feed_items_company_uq").on(t.companyId), index("feed_items_stage_idx").on(t.stage, t.segment)],
+);
+
+/** Journal des passages de l'alimentation automatique. */
+export const feedRuns = pgTable("feed_runs", {
+  id: id(),
+  source: text("source").notNull().default("cron"),
+  ok: boolean("ok").notNull().default(true),
+  found: integer("found").notNull().default(0),
+  imported: integer("imported").notNull().default(0),
+  completed: integer("completed").notNull().default(0),
+  diagnosed: integer("diagnosed").notNull().default(0),
+  enrolled: integer("enrolled").notNull().default(0),
+  rejected: integer("rejected").notNull().default(0),
+  message: text("message").notNull().default(""),
+  createdAt: createdAt(),
+});
 
 /** État d'un service d'envoi (audit | diagnostic) : en pause automatique ou non, pourquoi, et depuis quand (la reprise remet le compteur de santé à zéro). */
 export const mailServiceState = pgTable("mail_service_state", {

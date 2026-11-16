@@ -140,3 +140,21 @@ export function siteFromNotes(notes: string): string {
   const url = /^https?:\/\//i.test(raw) ? raw : "https://" + raw;
   return hostOf(url).includes(".") ? url : "";
 }
+
+/** Adresse générique d'entreprise (contact@, accueil@…), par opposition à une adresse nominative. */
+export function isGenericEmail(email: string): boolean {
+  return GENERIC.has(ascii(email.split("@")[0] ?? ""));
+}
+
+/**
+ * Adresse à retenir pour l'alimentation automatique, parmi celles réellement publiées sur le site de l'entreprise :
+ * une adresse générique en priorité, sur le domaine du site d'abord. Rien n'est deviné ni reconstitué :
+ * si la liste est vide, le résultat est vide.
+ */
+export function pickPublishedEmail(emails: string[], siteHost: string): string {
+  const score = (e: string) => {
+    const domain = e.split("@")[1] ?? "";
+    return (isGenericEmail(e) ? 2 : 0) + (siteHost && baseDomain(domain) === baseDomain(siteHost.replace(/^www\./, "")) ? 1 : 0);
+  };
+  return [...emails].sort((a, b) => score(b) - score(a))[0] ?? "";
+}

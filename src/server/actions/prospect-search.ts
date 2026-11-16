@@ -4,9 +4,8 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { db, schema } from "@/db";
 import { requireUser } from "@/lib/auth";
-import { EFFECTIF_CODES, OFFER_ID, SEARCHABLE_SECTORS, type Sector } from "@/lib/prospect-search";
-import { estimateAmountCents, priorityFor } from "@/lib/estimate";
-import { logEvent } from "../core";
+import { EFFECTIF_CODES, SEARCHABLE_SECTORS, type Sector } from "@/lib/prospect-search";
+import { insertProspect } from "../prospect-import";
 import { getProfile } from "../queries";
 import { fetchBySiren, findPlace, searchAnnuaire, type FoundPage } from "../prospect-search";
 
@@ -70,18 +69,7 @@ export async function importProspectsAction(input: unknown): Promise<{ ok: true;
       const c = r.company;
       if (c.blocked) { blocked++; continue; }
       if (sirens.has(c.siren) || names.has(c.name.trim().toLowerCase())) { dup++; continue; }
-      const website = /^(https?:\/\/)?[^\s]+\.[^\s]+$/.test(it.website) ? it.website : "";
-      const amountCents = estimateAmountCents(OFFER_ID[p.data.offer], c.effectifCode, prixAuditCents);
-      const notes = [`Trouvée par recherche automatique (Annuaire des Entreprises, SIREN ${c.siren}).`, `Activité (NAF) : ${c.naf} · Taille : ${c.effectif}.`, `Montant estimé calculé automatiquement (${OFFER_ID[p.data.offer]}, taille ${c.effectif}) : à ajuster.`, website ? `Site web : ${website}` : "", "E-mail du dirigeant à trouver avant tout envoi."].filter(Boolean).join("\n");
-      await db.transaction(async (tx) => {
-        const co = (await tx.insert(schema.companies).values({
-          name: c.name, sector: c.sector, source: "Recherche automatique", offer: OFFER_ID[p.data.offer], priority: priorityFor(c.effectifCode), stage: "qualif", amountCents,
-          city: c.city, address: c.address, siren: c.siren, notes,
-        }).returning({ id: schema.companies.id }))[0];
-        if (c.director) await tx.insert(schema.contacts).values({ companyId: co.id, firstName: c.director.firstName, lastName: c.director.lastName, role: c.director.role, phone: it.phone, isPrimary: true });
-        else if (it.phone) await tx.insert(schema.contacts).values({ companyId: co.id, firstName: "Standard", lastName: "", role: "Standard", phone: it.phone, isPrimary: true });
-        await logEvent(tx, co.id, "create", "Entreprise ajoutée par la recherche automatique de prospects");
-      });
+      await insertProspect(c, { offer: p.data.offer, phone: it.phone, website: it.website, prixAuditCents });
       sirens.add(c.siren);
       names.add(c.name.trim().toLowerCase());
       addedSirens.push(c.siren);

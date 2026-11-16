@@ -93,3 +93,13 @@ Prérequis côté Brevo : domaine infracyb.fr authentifié, expéditeur contact@
 - Page Campagnes, section « Bilan » : entreprises contactées, mails, délivrées, rebonds, plaintes, désinscriptions, réponses, rendez-vous, devis acceptés, avec les taux. Trois vues : tout, cohorte à J+14, cohorte à J+30.
 - Colonne « Délivrées » : cocher l'événement « Délivré » (delivered) dans le webhook Brevo. Sans lui, la colonne affiche « — ».
 - Aucune comparaison en dessous de 30 entreprises par ligne ; au-delà, un écart n'est retenu que s'il dépasse la marge d'incertitude.
+
+### Alimentation automatique (campagnes permanentes)
+
+- Page **Alimentation** : interrupteur général, réglages, entreprises traitées (importées, complétées, inscrites, écartées et pourquoi), journal des passages.
+- **Arrêtée par défaut.** Rien n'est cherché, importé ni inscrit tant que tu n'as pas cliqué sur « Mettre en marche ». Le service Audit n'est alimenté que si tu coches sa case : il partage le plafond de la campagne d'audit en cours.
+- Tâche planifiée `/api/cron/alimentation` (jours ouvrés, 5 h UTC, même `CRON_SECRET`), avant les diagnostics (6 h 30) et les envois (8 h). Pas de passage les jours fériés.
+- Étapes : recherche dans l'Annuaire des Entreprises par segment (codes NAF, tailles, départements), import (30 par jour et par segment par défaut), site et téléphone par Google Places si `GOOGLE_PLACES_API_KEY` est configurée (30 requêtes par jour par défaut), adresse **seulement si elle est publiée sur le site** (générique en priorité, origine « site »), diagnostic, inscription dans la campagne permanente du service et du segment.
+- Une entreprise n'est inscrite que si elle remplit toutes les conditions d'entrée habituelles, et seulement s'il reste de la place : les mails déjà dus plus ceux des nouvelles inscriptions doivent tenir dans le plafond quotidien sur la durée d'une séquence.
+- Sans Google Places, seules les entreprises dont le site est déjà noté sur la fiche peuvent être complétées : les autres sont écartées avec ce motif.
+- Migration : section « Phase F » de `drizzle-manuel-diagnostic.sql`, ou `npm run db:migrate`, avant de déployer.
