@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { HOOK_VARIANTS, type Check } from "../src/lib/diagnostic";
 import { buildDiagnosticMail, HOOK_TEXT, IMPACT, SECONDARY_TEXT, SEGMENTS, SEGMENT_SECTORS, SEQUENCE, segmentOfSector, type DiagnosticMailInput } from "../src/lib/diagnostic-mails";
+import { greetsWithoutName } from "../src/lib/contact-extract";
 import { sectorFromNaf, SECTOR_SEARCH } from "../src/lib/prospect-search";
 
 const md = readFileSync("textes-campagne-diagnostic-v2.md", "utf8");
@@ -114,6 +115,20 @@ test("un champ obligatoire vide : le mail ne part pas", () => {
   assert.match(ko({ signature: "Jean\n[ton numéro] · [ton e-mail]" }), /Champ non rempli/);
   assert.match(ko({ segment: "inconnu" as never }), /Modèle de mail introuvable/);
   assert.match(ko({ step: 4 }), /Modèle de mail introuvable/);
+});
+
+test("adresse générique publiée, sans dirigeant : « Bonjour, » ; dans tous les autres cas le prénom reste obligatoire", () => {
+  assert.deepEqual([greetsWithoutName("contact@a.fr", "site"), greetsWithoutName("contact@a.fr", "saisie"), greetsWithoutName("contact@a.fr", "historique"), greetsWithoutName("claire.durand@a.fr", "site"), greetsWithoutName("", "site")], [true, false, false, false, false]);
+  for (const segment of SEGMENTS) for (let step = 0; step < 4; step++) for (const prenom of ["", "Standard"]) {
+    const m = ok({ segment, step, prenom, sansPrenom: true });
+    const withName = ok({ segment, step });
+    assert.ok(m.body.startsWith("Bonjour,\n\n"), m.body.slice(0, 40));
+    assert.equal(m.body, withName.body.replace("Bonjour Claire,", "Bonjour,")); // seule la salutation change
+    assert.equal(m.subject, withName.subject);
+  }
+  assert.ok(ok({ sansPrenom: true }).body.startsWith("Bonjour Claire,")); // un prénom connu est toujours utilisé
+  assert.match(ko({ prenom: "", sansPrenom: false }), /Champ obligatoire vide : prenom/);
+  assert.match(ko({ prenom: "", sansPrenom: true, entreprise: "" , step: 2 }), /entreprise/); // les autres champs restent obligatoires
 });
 
 test("valeurs venues de la fiche : jamais interprétées comme des champs, jamais de saut de ligne injecté", () => {

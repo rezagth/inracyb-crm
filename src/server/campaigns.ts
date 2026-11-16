@@ -3,6 +3,7 @@ import { and, asc, desc, eq, gte, inArray, sql } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { stageOf, stageRank } from "@/lib/constants";
 import { EMAIL_RE } from "@/lib/brevo";
+import { greetsWithoutName } from "@/lib/contact-extract";
 import {
   crossHistory,
   dailyState,
@@ -173,7 +174,7 @@ type DiagnosticPrep = { mail: CampaignMail; hook: string } | { stop: string } | 
  * (on n'écrit jamais une affirmation devenue fausse). Mesure impossible aujourd'hui : rien ne part, nouvel essai au passage suivant.
  * J+7 et J+14 ne citent aucune mesure : ils reprennent le domaine et le constat du premier mail.
  */
-async function prepareDiagnosticMail(a: { companyId: string; companyName: string; notes: string; email: string; firstName: string; segment: string; step: number; hook: string; profile: Profile; signature: string; today: string; probe: Probe }): Promise<DiagnosticPrep> {
+async function prepareDiagnosticMail(a: { companyId: string; companyName: string; notes: string; email: string; emailSource: string; firstName: string; segment: string; step: number; hook: string; profile: Profile; signature: string; today: string; probe: Probe }): Promise<DiagnosticPrep> {
   if (!isSegment(a.segment)) return { error: "Campagne sans segment : impossible de choisir le texte du mail." };
   const segment: Segment = a.segment;
   let checks: Check[] = [];
@@ -207,7 +208,7 @@ async function prepareDiagnosticMail(a: { companyId: string; companyName: string
     checks = parseChecks(last?.findings ?? "[]").filter((c) => c.variant === hook);
   }
   if (!isHookVariant(hook)) return { error: "Constat du premier mail introuvable : rien n'a été envoyé." };
-  const m = buildDiagnosticMail({ segment, step: a.step, hook, checks, mailDomain, webHost, prenom: a.firstName, entreprise: a.companyName, me: a.profile.me, signature: a.signature });
+  const m = buildDiagnosticMail({ segment, step: a.step, hook, checks, mailDomain, webHost, prenom: a.firstName, sansPrenom: greetsWithoutName(a.email, a.emailSource), entreprise: a.companyName, me: a.profile.me, signature: a.signature });
   return m.ok ? { mail: { subject: m.subject, body: m.body }, hook } : { error: m.error };
 }
 
@@ -323,7 +324,7 @@ export async function runCampaigns(opts: { campaignId?: string; budgetMs?: numbe
     const prospect: Prospect = { name: c.name, sector: c.sector, contact: [ct?.firstName, ct?.lastName].filter(Boolean).join(" "), role: ct?.role ?? "", email, phone: ct?.phone ?? "" };
     let mail: CampaignMail | null;
     if (service === "diagnostic") {
-      const prep = await prepareDiagnosticMail({ companyId: c.id, companyName: c.name, notes: c.notes, email, firstName: ct?.firstName ?? "", segment: campaign.segment, step, hook: item.hook, profile, signature: scripts(prospect, "audit", profile).x.sig, today: t, probe: opts.probe ?? publicProbe });
+      const prep = await prepareDiagnosticMail({ companyId: c.id, companyName: c.name, notes: c.notes, email, emailSource: ct?.emailSource ?? "", firstName: ct?.firstName ?? "", segment: campaign.segment, step, hook: item.hook, profile, signature: scripts(prospect, "audit", profile).x.sig, today: t, probe: opts.probe ?? publicProbe });
       if ("stop" in prep) { await stop(item.id, prep.stop); continue; }
       if ("error" in prep) {
         await db.update(schema.mailCampaignItems).set({ lastError: prep.error.slice(0, 300) }).where(eq(schema.mailCampaignItems.id, item.id));

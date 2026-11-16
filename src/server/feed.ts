@@ -2,7 +2,7 @@ import "server-only";
 import { and, asc, desc, eq, inArray, ne, sql } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { entryExclusion, ENTRY_EXCLUSION_LABEL, SERVICE_LABEL, serviceOf, type ServiceKey } from "@/lib/campaign";
-import { hostOf, pickPublishedEmail, siteFromNotes } from "@/lib/contact-extract";
+import { greetsWithoutName, hostOf, pickPublishedEmail, siteFromNotes } from "@/lib/contact-extract";
 import { DIAGNOSTIC_FRESH_DAYS, RULES_VERSION, usableDiagnostic, type Probe } from "@/lib/diagnostic";
 import { SEGMENTS, isSegment, segmentOfSector, type Segment } from "@/lib/diagnostic-mails";
 import { enrolSlots, FEED_DEFAULTS, MAILS_PER_PROSPECT, nextCursor, parseDepartements, permanentName, readCursors, REJECT, searchPlan, type Cursor } from "@/lib/feed";
@@ -285,7 +285,7 @@ export async function runFeed(opts: { source?: "cron" | "manuel"; budgetMs?: num
             return fresh ? { kind: "reject", reason: REJECT.noHook } : { kind: "rediagnose" };
           }
           const first = (ct?.firstName ?? "").trim();
-          if (!first || /^standard$/i.test(first)) return { kind: "reject", reason: REJECT.noFirstName };
+          if ((!first || /^standard$/i.test(first)) && !greetsWithoutName(cand.email, cand.emailSource)) return { kind: "reject", reason: REJECT.noFirstName };
         }
         if (status[service].paused) return { kind: "wait", reason: `En attente : service ${SERVICE_LABEL[service]} en pause` };
         if (slots[service] <= 0) return { kind: "wait", reason: `En attente : le plafond ${SERVICE_LABEL[service]} des prochains jours est déjà rempli` };

@@ -252,14 +252,23 @@ test("diagnostic : relances J+3, J+7, J+14 ; constat remesuré avant l'envoi ; a
   const last = await runCampaigns();
   assert.deepEqual([last.sent, last.stopped], gone ? [0, 1] : [1, 0]);
   if (gone) assert.equal((await itemOf(diagIds[4])).stopReason, "Plus de constat à la date d'envoi");
-  // Un contact sans prénom (adresse générique « Standard ») : champ obligatoire vide, le mail ne part pas.
-  const generic = await company("Cabinet Générique", "site", "contact@diag6.fr");
+  // Contact sans prénom (« Standard ») : adresse générique saisie à la main = champ obligatoire vide, le mail ne part pas ;
+  // adresse générique publiée sur le site = le mail part, avec « Bonjour, ».
+  const generic = await company("Cabinet Générique", "saisie", "contact@diag6.fr");
   await db.update(schema.contacts).set({ firstName: "Standard" }).where(eq(schema.contacts.companyId, generic));
   const camp = (await db.select().from(schema.mailCampaigns).where(eq(schema.mailCampaigns.offer, "diagnostic")))[0];
   await db.insert(schema.mailCampaignItems).values({ campaignId: camp.id, companyId: generic, nextStep: 0, nextDue: T });
   const g = await runCampaigns();
   assert.equal(g.sent, 0);
   assert.match((await itemOf(generic)).lastError, /Champ obligatoire vide : prenom/);
+  await db.update(schema.contacts).set({ emailSource: "site" }).where(eq(schema.contacts.companyId, generic));
+  const sentBefore = outbox.length;
+  const g2 = await runCampaigns();
+  assert.equal(g2.sent, 1);
+  const hello = outbox.slice(sentBefore);
+  assert.deepEqual(hello.map((o) => o.to[0].email), ["contact@diag6.fr"]);
+  assert.ok(hello[0].textContent.startsWith("Bonjour,\n\n"), hello[0].textContent.slice(0, 40));
+  assert.ok(!/\{prenom\}|Standard/.test(hello[0].textContent + hello[0].subject));
   await db.update(schema.mailCampaignItems).set({ status: "arrete", stopReason: "Test" }).where(eq(schema.mailCampaignItems.companyId, generic));
 });
 

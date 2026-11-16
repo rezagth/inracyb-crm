@@ -146,6 +146,11 @@ export function isGenericEmail(email: string): boolean {
   return GENERIC.has(ascii(email.split("@")[0] ?? ""));
 }
 
+/** Adresse générique publiée sur le site de l'entreprise : le mail peut commencer par « Bonjour, », sans prénom. */
+export function greetsWithoutName(email: string, emailSource: string): boolean {
+  return emailSource === "site" && isGenericEmail(email);
+}
+
 /**
  * Adresse à retenir pour l'alimentation automatique, parmi celles réellement publiées sur le site de l'entreprise :
  * une adresse générique en priorité, sur le domaine du site d'abord. Rien n'est deviné ni reconstitué :

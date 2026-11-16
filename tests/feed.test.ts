@@ -166,18 +166,19 @@ test("un passage : recherche, dédoublonnage, import, enrichissement, diagnostic
     found("Gamma Apps", "Numérique"), // tout est en ordre côté courrier : aucun constat
     found("Hors Segment SARL", "Immobilier"), // secteur qui n'appartient pas au segment
   ];
-  world.pages["Expertise comptable||1"] = [found("Iota Compta", "Expertise comptable", { director: null })];
+  world.pages["Expertise comptable||1"] = [found("Iota Compta", "Expertise comptable", { director: null }), found("Omicron Compta", "Expertise comptable", { director: null })];
   site("Alpha Logiciels", "www.alpha.fr", ["claire.durand@alpha.fr", "contact@alpha.fr"], ["01 40 00 00 01"]);
   site("Epsilon Soft", "epsilon.fr", [], ["01 40 00 00 02"]);
   world.places["Phi Dev"] = { website: "https://phi.fr", phone: "" };
   site("Gamma Apps", "gamma.fr", ["contact@gamma.fr"]);
   site("Iota Compta", "iota.fr", ["cabinet@iota.fr"]);
-  world.noDmarc = new Set(["alpha.fr", "iota.fr"]);
+  site("Omicron Compta", "omicron.fr", ["jean.martin@omicron.fr"]);
+  world.noDmarc = new Set(["alpha.fr", "iota.fr", "omicron.fr"]);
 
   const r = await run();
-  assert.deepEqual([r.ok, r.ran, r.found, r.imported, r.completed, r.diagnosed, r.enrolled, r.rejected], [true, true, 11, 6, 3, 3, 1, 4], r.message);
+  assert.deepEqual([r.ok, r.ran, r.found, r.imported, r.completed, r.diagnosed, r.enrolled, r.rejected], [true, true, 12, 7, 4, 4, 2, 4], r.message);
   assert.match(r.message, /3 déjà dans le CRM · 1 opposée\(s\) à la prospection/);
-  assert.equal((await db.select().from(schema.companies)).length, 8); // 2 existantes + 6 importées
+  assert.equal((await db.select().from(schema.companies)).length, 9); // 2 existantes + 7 importées
   assert.equal(await feedOf("Beta Conseil"), undefined);
   assert.equal(await feedOf("Hors Segment SARL"), undefined);
   // Recherche : codes du segment, tailles ciblées, France entière.
@@ -200,8 +201,13 @@ test("un passage : recherche, dédoublonnage, import, enrichissement, diagnostic
   const e = (await feedOf("Epsilon Soft"))!; // enrichissement partiel : le téléphone est gardé, pas d'inscription sans adresse
   assert.deepEqual([e.f.stage, e.f.reason, e.ct.phone, e.ct.email, e.item], ["ecarte", "Aucune adresse publiée sur le site (téléphone trouvé)", "01 40 00 00 02", "", undefined]);
   assert.deepEqual([(await feedOf("Gamma Apps"))!.f.stage, (await feedOf("Gamma Apps"))!.f.reason], ["ecarte", "Aucun constat certain utilisable (diagnostic)"]);
-  const i = (await feedOf("Iota Compta"))!; // constat présent, mais pas de dirigeant : le mail du diagnostic exige un prénom
-  assert.deepEqual([i.f.stage, i.f.reason, i.ct.firstName, i.ct.email, i.ct.emailSource], ["ecarte", "Pas de prénom de dirigeant pour le mail", "Standard", "cabinet@iota.fr", "site"]);
+  // Pas de dirigeant, mais une adresse générique publiée sur le site : inscrite, le mail commencera par « Bonjour, ».
+  const i = (await feedOf("Iota Compta"))!;
+  assert.deepEqual([i.f.stage, i.f.service, i.f.segment, i.ct.firstName, i.ct.email, i.ct.emailSource], ["inscrit", "diagnostic", "cabinets", "Standard", "cabinet@iota.fr", "site"]);
+  assert.deepEqual([i.item.status, i.item.nextStep], ["en_cours", 0]);
+  // Pas de dirigeant et seulement une adresse nominative : écartée, le mail du diagnostic exige alors un prénom.
+  const k = (await feedOf("Omicron Compta"))!;
+  assert.deepEqual([k.f.stage, k.f.reason, k.ct.firstName, k.ct.email, k.item], ["ecarte", "Pas de prénom de dirigeant pour le mail", "Standard", "jean.martin@omicron.fr", undefined]);
   // Site illisible : nouvel essai aux passages suivants.
   const p = (await feedOf("Phi Dev"))!;
   assert.deepEqual([p.f.stage, p.f.tries], ["a_completer", 1]);
@@ -209,14 +215,14 @@ test("un passage : recherche, dédoublonnage, import, enrichissement, diagnostic
 
   const runs = await db.select().from(schema.feedRuns);
   assert.equal(runs.length, 1);
-  assert.deepEqual([runs[0].ok, runs[0].imported, runs[0].enrolled, runs[0].rejected], [true, 6, 1, 4]);
+  assert.deepEqual([runs[0].ok, runs[0].imported, runs[0].enrolled, runs[0].rejected], [true, 7, 2, 4]);
 });
 
 test("passages suivants : rien n'est importé deux fois, la campagne permanente est réutilisée, le site illisible finit écarté", async () => {
   const r2 = await run();
   assert.deepEqual([r2.imported, r2.enrolled], [0, 0]);
-  assert.equal((await db.select().from(schema.companies)).length, 8);
-  assert.equal((await db.select().from(schema.mailCampaigns)).length, 1);
+  assert.equal((await db.select().from(schema.companies)).length, 9);
+  assert.equal((await db.select().from(schema.mailCampaigns)).length, 2);
   assert.equal((await feedOf("Phi Dev"))!.f.tries, 2);
   await run();
   const p = (await feedOf("Phi Dev"))!;
@@ -285,7 +291,7 @@ test("inscriptions limitées par le plafond des prochains jours ; service en pau
 
   const enrolledBefore = (await db.select().from(schema.mailCampaignItems)).length;
   const r = await run();
-  // Diagnostic au premier palier : 4 premiers mails par jour. Alpha et Quota attendent déjà leur premier mail.
+  // Diagnostic au premier palier : 4 premiers mails par jour. Alpha, Iota et Quota attendent déjà leur premier mail.
   const stages = await Promise.all(names.map(async (x) => (await feedOf(x))!.f));
   const now = (await db.select().from(schema.mailCampaignItems)).filter((x) => x.status === "en_cours");
   assert.equal(now.filter((x) => x.nextStep === 0).length, 4);
@@ -304,7 +310,7 @@ test("inscriptions limitées par le plafond des prochains jours ; service en pau
   await db.update(schema.mailServiceState).set({ paused: false, reason: "" });
   const resumed = await run();
   assert.ok(resumed.enrolled >= 1);
-  assert.equal((await db.select().from(schema.mailCampaigns)).length, 1);
+  assert.deepEqual((await db.select().from(schema.mailCampaigns)).map((c) => c.segment).sort(), ["cabinets", "editeurs"]); // une par segment, jamais de doublon
   assert.equal(new Set((await db.select().from(schema.mailCampaignItems)).map((x) => x.companyId)).size, (await db.select().from(schema.mailCampaignItems)).length); // une seule séquence par entreprise
 });
 

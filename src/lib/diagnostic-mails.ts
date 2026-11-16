@@ -69,6 +69,8 @@ export type DiagnosticMailInput = {
   mailDomain: string;
   webHost: string;
   prenom: string;
+  /** adresse générique publiée sur le site, sans dirigeant connu : le mail commence par « Bonjour, » */
+  sansPrenom?: boolean;
   entreprise: string;
   /** nom de l'expéditeur, à la place de « [mon prénom] » */
   me: string;
@@ -100,8 +102,10 @@ export function buildDiagnosticMail(i: DiagnosticMailInput): DiagnosticMail {
     signature: i.signature.trim(),
   };
   const missing = new Set<string>();
+  // Seule exception au prénom obligatoire : une adresse générique publiée, sans dirigeant connu.
+  const greet = (s: string) => (i.sansPrenom && !simple.prenom ? s.replace(/^Bonjour \{prenom\},/, "Bonjour,") : s);
   const fill = (s: string) => {
-    const expanded = s.replace(FIELD, (m, k: string) => (k in composed ? composed[k] : m));
+    const expanded = greet(s).replace(FIELD, (m, k: string) => (k in composed ? composed[k] : m));
     return expanded
       .replace(FIELD, (m, k: string) => {
         if (!(k in simple)) return m;
