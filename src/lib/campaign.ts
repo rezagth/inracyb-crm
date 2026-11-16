@@ -84,3 +84,143 @@ export function withUnsubscribeFooter(body: string, url: string): string {
 export function runFailed(r: { ok: boolean; sent: number; errors: number }): boolean {
   return !r.ok || (r.errors > 0 && r.sent === 0);
 }
+
+// ——— Deux services dans le même moteur : Audit (historique) et Diagnostic ———
+
+export type ServiceKey = "audit" | "diagnostic";
+export const SERVICE_KEYS: ServiceKey[] = ["audit", "diagnostic"];
+export const SERVICE_LABEL: Record<ServiceKey, string> = { audit: "Audit", diagnostic: "Diagnostic" };
+
+/** Offres qu'une campagne peut porter : les trois offres de la prospection, plus le diagnostic gratuit. */
+export type CampaignOffer = "audit" | "ciso" | "ia" | "diagnostic";
+export const CAMPAIGN_OFFERS: CampaignOffer[] = ["audit", "ciso", "ia", "diagnostic"];
+
+/**
+ * Service auquel un envoi est compté. Tout ce qui n'est pas le diagnostic (audit, RSSI, IA, envois à la main)
+ * reste dans le service « audit » : c'est exactement le périmètre du plafond d'avant.
+ */
+export function serviceOf(offer: string): ServiceKey {
+  return offer === "diagnostic" ? "diagnostic" : "audit";
+}
+
+/**
+ * Le service Diagnostic n'envoie rien tant que son moteur de constats et ses textes ne sont pas livrés :
+ * aucune campagne diagnostic ne peut être créée avant.
+ */
+export const DIAGNOSTIC_OPEN = false;
+
+export const DEFAULT_DAILY_LIMIT: Record<ServiceKey, number> = { audit: 10, diagnostic: 10 };
+export const MAX_DAILY_LIMIT = 300;
+/** Montée en charge du diagnostic : plafond par palier, un palier tous les RAMP_EVERY jours ouvrés depuis le premier envoi réel. */
+export const DIAGNOSTIC_RAMP = [4, 6, 8, 10] as const;
+export const RAMP_EVERY = 2;
+/** Repos entre la fin d'une séquence dans un service et l'entrée dans l'autre. */
+export const REST_DAYS_DEFAULT = 30;
+
+/** Lit un plafond facultatif (variable d'environnement) : entier strictement positif, borné ; sinon la valeur par défaut. */
+export function parseLimit(raw: string | undefined | null, fallback: number, max = MAX_DAILY_LIMIT): number {
+  const n = Number.parseInt(raw ?? "", 10);
+  return Number.isFinite(n) && n > 0 ? Math.min(n, max) : fallback;
+}
+
+/** Dimanche de Pâques (calendrier grégorien). */
+function easter(year: number): string {
+  const a = year % 19, b = Math.floor(year / 100), c = year % 100, d = Math.floor(b / 4), e = b % 4;
+  const f = Math.floor((b + 8) / 25), g = Math.floor((b - f + 1) / 3), h = (19 * a + b - d - g + 15) % 30;
+  const i = Math.floor(c / 4), k = c % 4, l = (32 + 2 * e + 2 * i - h - k) % 7, m = Math.floor((a + 11 * h + 22 * l) / 451);
+  const month = Math.floor((h + l - 7 * m + 114) / 31), day = ((h + l - 7 * m + 114) % 31) + 1;
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+/** Jour férié légal en France métropolitaine. */
+export function isFrenchHoliday(iso: string): boolean {
+  const y = Number(iso.slice(0, 4));
+  const e = easter(y);
+  const fixed = ["01-01", "05-01", "05-08", "07-14", "08-15", "11-01", "11-11", "12-25"];
+  return fixed.includes(iso.slice(5)) || [addDaysIso(e, 1), addDaysIso(e, 39), addDaysIso(e, 50)].includes(iso);
+}
+
+/** Jour ouvré : du lundi au vendredi, hors jours fériés. */
+export function isBusinessDay(iso: string): boolean {
+  const wd = new Date(iso + "T12:00:00Z").getUTCDay();
+  return wd !== 0 && wd !== 6 && !isFrenchHoliday(iso);
+}
+
+/** Nombre de jours ouvrés écoulés après `from`, jusqu'à `to` inclus (0 si to <= from). */
+export function businessDaysSince(from: string, to: string): number {
+  let n = 0;
+  for (let d = addDaysIso(from, 1), guard = 0; d <= to && guard < 400; d = addDaysIso(d, 1), guard++) if (isBusinessDay(d)) n++;
+  return n;
+}
+
+export type Ramp = { /** plafond du jour */ limit: number; /** palier courant (0 = premier) */ stage: number; /** plafonds de chaque palier */ stages: number[]; /** plafond visé une fois la montée finie */ target: number };
+
+/**
+ * Plafond du diagnostic aujourd'hui. Avant le premier envoi réel et le jour de cet envoi : premier palier.
+ * Les paliers ne dépassent jamais la cible ; une fois le dernier palier atteint, c'est la cible qui s'applique.
+ */
+export function rampLimit(firstSendOn: string | null, today: string, target: number): Ramp {
+  const stages = DIAGNOSTIC_RAMP.map((s) => Math.min(s, target));
+  const elapsed = firstSendOn ? businessDaysSince(firstSendOn, today) : 0;
+  const raw = Math.floor(elapsed / RAMP_EVERY);
+  const stage = Math.min(raw, stages.length - 1);
+  return { limit: raw >= stages.length - 1 ? target : stages[stage], stage, stages, target };
+}
+
+export type ServiceState = { limit: number; sent: number; remaining: number };
+export type DailyState = { audit: ServiceState; diagnostic: ServiceState & { ramp: Ramp; firstSendOn: string | null }; total: ServiceState };
+
+/** État du jour : plafond et envois de chaque service, plus un total global (somme des deux plafonds visés). */
+export function dailyState(input: { today: string; sentByOffer: Record<string, number>; firstDiagnosticSendOn: string | null; auditLimit: number; diagnosticTarget: number }): DailyState {
+  const sent: Record<ServiceKey, number> = { audit: 0, diagnostic: 0 };
+  for (const [offer, n] of Object.entries(input.sentByOffer)) sent[serviceOf(offer)] += n;
+  const ramp = rampLimit(input.firstDiagnosticSendOn, input.today, input.diagnosticTarget);
+  const mk = (limit: number, s: number): ServiceState => ({ limit, sent: s, remaining: Math.max(0, limit - s) });
+  const totalLimit = Math.min(MAX_DAILY_LIMIT, input.auditLimit + input.diagnosticTarget);
+  return { audit: mk(input.auditLimit, sent.audit), diagnostic: { ...mk(ramp.limit, sent.diagnostic), ramp, firstSendOn: input.firstDiagnosticSendOn }, total: mk(totalLimit, sent.audit + sent.diagnostic) };
+}
+
+/**
+ * Les mails à envoyer aujourd'hui, tous services confondus : chaque service dans la limite de son plafond restant,
+ * l'ensemble dans la limite du total restant, les plus en retard d'abord.
+ */
+export function pickDueByService<T extends { nextDue: string; service: ServiceKey }>(items: T[], today: string, state: DailyState): T[] {
+  const picked = SERVICE_KEYS.flatMap((s) => pickDue(items.filter((i) => i.service === s), today, state[s].remaining));
+  return pickDue(picked, today, state.total.remaining);
+}
+
+// ——— Passage d'un service à l'autre : une seule séquence à la fois, puis un délai de repos ———
+
+export const REPLIED_REASON = "A répondu";
+
+/** Ce qu'une entreprise a déjà vécu dans l'autre service. */
+export type CrossHistory = { /** dernier mail reçu au titre de l'autre service */ lastSend: string | null; /** a répondu à une séquence de l'autre service */ replied: boolean; /** a déjà reçu ce service-ci */ sameServiceSent: boolean };
+
+export type EntryExclusion = Exclusion | "a-repondu" | "repos" | "deja-diagnostique";
+export const ENTRY_EXCLUSION_LABEL: Record<EntryExclusion, string> = {
+  ...EXCLUSION_LABEL,
+  "a-repondu": "a déjà répondu à une autre séquence",
+  repos: "délai de repos après la séquence précédente",
+  "deja-diagnostique": "a déjà reçu le diagnostic",
+};
+
+/** Reconstitue l'historique d'une entreprise vu depuis le service visé, à partir des envois et des séquences arrêtées sur réponse. */
+export function crossHistory(target: ServiceKey, sends: { offer: string; sentOn: string }[], repliedOffers: string[]): CrossHistory {
+  const other = sends.filter((s) => serviceOf(s.offer) !== target).map((s) => s.sentOn).sort();
+  return { lastSend: other.at(-1) ?? null, replied: repliedOffers.some((o) => serviceOf(o) !== target), sameServiceSent: sends.some((s) => serviceOf(s.offer) === target) };
+}
+
+/**
+ * Pourquoi une entreprise ne peut pas entrer dans une campagne du service visé (null = éligible).
+ * Aux règles de toujours (exclusionOf) s'ajoutent : pas d'entrée après une réponse dans l'autre service,
+ * pas d'entrée avant la fin du délai de repos, et le diagnostic ne se reçoit qu'une fois.
+ * Sans historique dans l'autre service, le résultat est celui d'exclusionOf : la campagne d'audit ne change pas.
+ */
+export function entryExclusion(c: Candidate, optouts: Set<string>, inCampaign: Set<string>, target: ServiceKey, h: CrossHistory | undefined, today: string, restDays = REST_DAYS_DEFAULT): EntryExclusion | null {
+  const base = exclusionOf(c, optouts, inCampaign);
+  if (base || !h) return base;
+  if (h.replied) return "a-repondu";
+  if (h.lastSend && addDaysIso(h.lastSend, restDays) > today) return "repos";
+  if (target === "diagnostic" && h.sameServiceSent) return "deja-diagnostique";
+  return null;
+}

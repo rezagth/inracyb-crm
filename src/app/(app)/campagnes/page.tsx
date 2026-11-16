@@ -3,8 +3,8 @@ import { db, schema } from "@/db";
 import { prospectList } from "@/server/queries";
 import { getSettings } from "@/server/core";
 import { brevoConfig, brevoReady } from "@/server/brevo";
-import { appUrl, optoutSet } from "@/server/campaigns";
-import { exclusionOf, EXCLUSION_LABEL } from "@/lib/campaign";
+import { appUrl, crossHistories, getDailyState, optoutSet, restDays } from "@/server/campaigns";
+import { DIAGNOSTIC_OPEN, entryExclusion, ENTRY_EXCLUSION_LABEL, RAMP_EVERY, serviceOf } from "@/lib/campaign";
 import { BOUNCE_REASONS, REASON } from "@/lib/brevo-events";
 import { today } from "@/lib/format";
 import { PageHeader } from "@/components/ui";
@@ -23,11 +23,14 @@ export default async function CampagnesPage() {
     .from(schema.mailCampaignItems)
     .innerJoin(schema.companies, eq(schema.companies.id, schema.mailCampaignItems.companyId));
   const inCampaign = new Set(items.filter((i) => i.item.status === "en_cours").map((i) => i.item.companyId));
+  // Éligibilité vue depuis le service Audit (seul service ouvert à la création pour l'instant).
+  const history = await crossHistories("audit");
+  const rest = restDays();
   const prospects = (await prospectList()).map((p) => {
-    const ex = exclusionOf({ id: p.id, name: p.name, stage: p.stage, email: p.email }, optouts, inCampaign);
-    return { id: p.id, name: p.name, sector: p.sector, email: p.email, why: ex ? EXCLUSION_LABEL[ex] : null };
+    const ex = entryExclusion({ id: p.id, name: p.name, stage: p.stage, email: p.email }, optouts, inCampaign, "audit", history.get(p.id), t, rest);
+    return { id: p.id, name: p.name, sector: p.sector, email: p.email, why: ex ? ENTRY_EXCLUSION_LABEL[ex] : null };
   });
-  const sentToday = Number((await db.select({ n: sql<number>`count(*)` }).from(schema.mailSends).where(eq(schema.mailSends.sentOn, t)))[0]?.n ?? 0);
+  const state = await getDailyState(t);
   const sends = await db.select({ companyId: schema.mailSends.companyId, offer: schema.mailSends.offer }).from(schema.mailSends);
   const statsOf = (campaignId: string, offer: string) => {
     const its = items.filter((i) => i.item.campaignId === campaignId);
@@ -56,14 +59,18 @@ export default async function CampagnesPage() {
         offers={offers.length ? offers : ["audit"]}
         ready={brevoReady()}
         urlOk={!!appUrl()}
-        dailyLimit={brevoConfig().dailyLimit}
-        sentToday={sentToday}
+        dailyLimit={state.audit.limit}
+        sentToday={state.audit.sent}
+        diagnostic={{ open: DIAGNOSTIC_OPEN, limit: state.diagnostic.limit, sent: state.diagnostic.sent, stage: state.diagnostic.ramp.stage, stages: state.diagnostic.ramp.stages, target: state.diagnostic.ramp.target, every: RAMP_EVERY, firstSendOn: state.diagnostic.firstSendOn }}
+        total={{ limit: state.total.limit, sent: state.total.sent }}
+        restDays={rest}
         fromEmail={brevoConfig().fromEmail}
         health={health}
         campaigns={campaigns.map((c) => ({
           id: c.id,
           name: c.name,
           offer: c.offer,
+          service: serviceOf(c.offer),
           status: c.status,
           stats: statsOf(c.id, c.offer),
           items: items.filter((i) => i.item.campaignId === c.id).map((i) => ({ id: i.item.id, company: i.company, step: i.item.nextStep, due: i.item.nextDue, status: i.item.status, reason: i.item.stopReason, error: i.item.lastError })),

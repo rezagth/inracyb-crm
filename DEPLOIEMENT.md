@@ -51,6 +51,15 @@ Variables à ajouter dans `.env` en local **et** dans Vercel (Settings > Environ
 
 - `BREVO_API_KEY` : clé créée dans Brevo (SMTP et API > Clés API).
 - `MAIL_FROM_EMAIL` (défaut `contact@infracyb.fr`), `MAIL_FROM_NAME` (défaut `InfraCyb`), `MAIL_REPLY_TO` (défaut : l'expéditeur).
-- `MAIL_DAILY_LIMIT` : plafond d'envois par jour depuis le CRM (défaut 10, maximum 300).
+- `MAIL_DAILY_LIMIT` : plafond d'envois par jour du service Audit, envois à la main compris (défaut 10, maximum 300).
+
+### Deux services : Audit et Diagnostic
+
+Les plafonds sont dans le code (`src/lib/campaign.ts`) : aucune variable n'est à créer.
+
+- Audit : 10 par jour. Diagnostic : 10 par jour, atteint par paliers (4, 6, 8, 10 ; un palier tous les 2 jours ouvrés depuis le premier envoi réel). Total : 20.
+- Facultatif : `MAIL_DAILY_LIMIT_DIAGNOSTIC` (plafond visé du diagnostic), `CAMPAIGN_REST_DAYS` (repos avant de passer d'un service à l'autre, 30 jours par défaut).
+- Une entreprise n'a qu'une séquence en cours à la fois : index unique `mail_campaign_items_active_uq` (`npm run db:migrate`, ou `drizzle-manuel-diagnostic.sql` dans Neon, après le contrôle indiqué en tête du fichier).
+- Le déclenchement automatique n'envoie rien les jours fériés ; les mails dus partent au jour ouvré suivant.
 
 Prérequis côté Brevo : domaine infracyb.fr authentifié, expéditeur contact@infracyb.fr validé, téléphone vérifié.

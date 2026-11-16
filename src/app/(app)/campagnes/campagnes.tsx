@@ -7,21 +7,24 @@ import { Card } from "@/components/ui";
 import { Icon } from "@/components/icon";
 import { useToast } from "@/components/mod/toast";
 import { OFFER_KIT, type OfferKey } from "@/lib/prospection";
-import { STEP_LABELS } from "@/lib/campaign";
+import { SERVICE_KEYS, SERVICE_LABEL, STEP_LABELS, type ServiceKey } from "@/lib/campaign";
 import { fd } from "@/lib/format";
 
 type P = { id: string; name: string; sector: string; email: string; why: string | null };
 type Item = { id: string; company: string; step: number; due: string; status: string; reason: string; error: string };
 type Stats = { contacted: number; mails: number; replies: number; bounces: number; spam: number; optouts: number };
 type Health = { missing: boolean; lastRun: { at: string; source: string; ok: boolean; message: string } | null; events: Record<string, number> };
-type C = { id: string; name: string; offer: string; status: string; stats: Stats; items: Item[] };
+type C = { id: string; name: string; offer: string; service: ServiceKey; status: string; stats: Stats; items: Item[] };
+type Diag = { open: boolean; limit: number; sent: number; stage: number; stages: number[]; target: number; every: number; firstSendOn: string | null };
 
 const STATUS: Record<string, string> = { active: "En cours", pause: "En pause", terminee: "Terminée" };
 
-export function Campagnes({ prospects, offers, ready, urlOk, dailyLimit, sentToday, fromEmail, health, campaigns }: { prospects: P[]; offers: OfferKey[]; ready: boolean; urlOk: boolean; dailyLimit: number; sentToday: number; fromEmail: string; health: Health; campaigns: C[] }) {
+export function Campagnes({ prospects, offers, ready, urlOk, dailyLimit, sentToday, diagnostic, total, restDays, fromEmail, health, campaigns: allCampaigns }: { prospects: P[]; offers: OfferKey[]; ready: boolean; urlOk: boolean; dailyLimit: number; sentToday: number; diagnostic: Diag; total: { limit: number; sent: number }; restDays: number; fromEmail: string; health: Health; campaigns: C[] }) {
   const router = useRouter();
   const toast = useToast();
   const [pending, start] = useTransition();
+  const [tab, setTab] = useState<ServiceKey>("audit");
+  const campaigns = allCampaigns.filter((c) => c.service === tab);
   const [name, setName] = useState("");
   const [offer, setOffer] = useState<OfferKey>(offers[0]);
   const [q, setQ] = useState("");
@@ -74,7 +77,34 @@ export function Campagnes({ prospects, offers, ready, urlOk, dailyLimit, sentTod
         </div>
       </Card>
 
-      <Card title="Nouvelle campagne" actions={<span className="text-xs text-subtle-fg">Envoi depuis {fromEmail} · {sentToday}/{dailyLimit} mails aujourd&apos;hui</span>}>
+      <div role="tablist" aria-label="Service" className="flex flex-wrap items-center gap-2">
+        {SERVICE_KEYS.map((s) => {
+          const sent = s === "audit" ? sentToday : diagnostic.sent;
+          const limit = s === "audit" ? dailyLimit : diagnostic.limit;
+          return (
+            <button key={s} type="button" role="tab" aria-selected={tab === s} className={tab === s ? "btn btn-pri btn-sm" : "btn btn-sec btn-sm"} onClick={() => setTab(s)}>
+              {SERVICE_LABEL[s]} · {sent}/{limit} aujourd&apos;hui
+            </button>
+          );
+        })}
+        <span className="text-xs text-subtle-fg">Total du jour : {total.sent}/{total.limit} · une seule séquence à la fois par entreprise · {restDays} jours de repos avant de passer d&apos;un service à l&apos;autre</span>
+      </div>
+
+      {tab === "diagnostic" && (
+        <Card title="Service Diagnostic" actions={<span className="text-xs text-subtle-fg">{diagnostic.sent}/{diagnostic.limit} mails aujourd&apos;hui</span>}>
+          <div className="flex flex-col gap-2 p-5 text-[13px]">
+            <p className="text-muted-fg">
+              Montée en charge : {diagnostic.stages.map((n, i) => (i === diagnostic.stage ? `[${n}]` : String(n))).join(" → ")} mails par jour, un palier tous les {diagnostic.every} jours ouvrés à partir du premier envoi réel{diagnostic.target > (diagnostic.stages.at(-1) ?? 0) ? `, puis ${diagnostic.target}` : ""}.
+            </p>
+            <p className="text-muted-fg">
+              Palier du jour : {diagnostic.stage + 1} sur {diagnostic.stages.length} ({diagnostic.limit} mails). {diagnostic.firstSendOn ? `Premier envoi le ${fd(diagnostic.firstSendOn)}.` : "Aucun envoi pour l'instant : la montée démarre au premier mail."}
+            </p>
+            {!diagnostic.open && <p className="tip">Ce service n&apos;envoie rien pour l&apos;instant : la création de campagne s&apos;ouvrira quand le moteur de constats et les textes des mails seront en place.</p>}
+          </div>
+        </Card>
+      )}
+
+      {tab === "audit" && <Card title="Nouvelle campagne" actions={<span className="text-xs text-subtle-fg">Envoi depuis {fromEmail} · {sentToday}/{dailyLimit} mails aujourd&apos;hui</span>}>
         <div className="flex flex-col gap-4 p-5">
           <div className="flex flex-wrap gap-3">
             <input className="input min-w-[220px] flex-1" placeholder="Nom de la campagne (ex. Avocats Île-de-France)" value={name} onChange={(e) => setName(e.target.value)} maxLength={120} aria-label="Nom de la campagne" />
@@ -88,7 +118,7 @@ export function Campagnes({ prospects, offers, ready, urlOk, dailyLimit, sentTod
           <div className="flex flex-wrap items-center gap-3 text-[13px]">
             <button type="button" className="btn btn-sec btn-sm" onClick={() => setSel(new Set([...sel, ...shown.map((p) => p.id)]))}>Tout sélectionner ({shown.length})</button>
             <button type="button" className="btn btn-sec btn-sm" onClick={() => setSel(new Set())}>Tout désélectionner</button>
-            <span className="text-muted-fg">{eligible.length} entreprise(s) éligible(s){excluded ? ` · ${excluded} exclue(s) (pas d'e-mail, perdue, désinscrite, déjà en campagne ou avancée)` : ""}</span>
+            <span className="text-muted-fg">{eligible.length} entreprise(s) éligible(s){excluded ? ` · ${excluded} exclue(s) (pas d'e-mail, perdue, désinscrite, déjà en campagne, avancée ou en délai de repos)` : ""}</span>
           </div>
           <div className="max-h-[320px] overflow-auto rounded-lg border border-border">
             {eligible.length === 0 ? (
@@ -125,10 +155,10 @@ export function Campagnes({ prospects, offers, ready, urlOk, dailyLimit, sentTod
             {sel.size > 0 && <span className="text-xs text-muted-fg">Premier lot : {Math.min(sel.size, left)} mail(s) · fin du J0 vers le {days} jour(s) · plafond {dailyLimit}/jour (MAIL_DAILY_LIMIT)</span>}
           </div>
         </div>
-      </Card>
+      </Card>}
 
       <Card
-        title="Campagnes"
+        title={`Campagnes ${SERVICE_LABEL[tab]}`}
         actions={
           <button type="button" className="btn btn-sec btn-sm" disabled={pending || !ready || !urlOk} onClick={() => run(runCampaignsNowAction)}>
             <Icon name="mail" />
@@ -146,7 +176,7 @@ export function Campagnes({ prospects, offers, ready, urlOk, dailyLimit, sentTod
                 <details key={c.id} className="p-5">
                   <summary className="flex cursor-pointer flex-wrap items-center gap-3">
                     <strong>{c.name}</strong>
-                    <span className="text-xs text-muted-fg">{OFFER_KIT[c.offer as OfferKey]?.l ?? c.offer} · {STATUS[c.status] ?? c.status}</span>
+                    <span className="text-xs text-muted-fg">{OFFER_KIT[c.offer as OfferKey]?.l ?? (c.offer === "diagnostic" ? "Diagnostic gratuit" : c.offer)} · {STATUS[c.status] ?? c.status}</span>
                     <span className="text-xs text-muted-fg">{n("en_cours")} en cours · {n("termine")} terminée(s) · {n("arrete")} arrêtée(s){c.items.some((i) => i.error) ? ` · ${c.items.filter((i) => i.error).length} en erreur` : ""}</span>
                     <span className="text-xs text-muted-fg">{c.stats.contacted} contactée(s) · {c.stats.mails} mail(s) · {c.stats.replies} réponse(s) · {c.stats.bounces} rebond(s){c.stats.spam ? ` · ${c.stats.spam} plainte(s) spam` : ""}{c.stats.optouts ? ` · ${c.stats.optouts} désinscrit(s)` : ""}</span>
                   </summary>

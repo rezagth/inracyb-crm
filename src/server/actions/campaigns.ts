@@ -5,14 +5,14 @@ import { and, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { db, schema } from "@/db";
 import { requireUser } from "@/lib/auth";
-import { exclusionOf, EXCLUSION_LABEL, type Exclusion } from "@/lib/campaign";
+import { CAMPAIGN_OFFERS, DIAGNOSTIC_OPEN, entryExclusion, ENTRY_EXCLUSION_LABEL, serviceOf, type EntryExclusion } from "@/lib/campaign";
 import { today } from "@/lib/format";
 import { prospectList } from "../queries";
 import { logEvent } from "../core";
-import { optoutSet, recordOptout, recordRun, runCampaigns } from "../campaigns";
+import { crossHistories, optoutSet, recordOptout, recordRun, restDays, runCampaigns } from "../campaigns";
 
 type R = { ok: true; message: string } | { ok: false; error: string };
-const offerZ = z.enum(["audit", "ciso", "ia"]);
+const offerZ = z.enum(CAMPAIGN_OFFERS as [string, ...string[]]);
 const MAX_PER_CAMPAIGN = 500;
 
 /** Crée la campagne avec les entreprises cochées (re-filtrées côté serveur : jamais de Perdu, désinscrit, sans e-mail ou déjà en campagne), puis envoie le premier lot du jour. */
@@ -23,6 +23,7 @@ export async function createCampaignAction(name: string, offer: string, companyI
   const ids = z.array(z.string().min(1).max(64)).min(1).max(MAX_PER_CAMPAIGN).safeParse(companyIds);
   if (!n.success) return { ok: false, error: "Donne un nom à la campagne." };
   if (!o.success) return { ok: false, error: "Offre invalide." };
+  if (o.data === "diagnostic" && !DIAGNOSTIC_OPEN) return { ok: false, error: "Le service Diagnostic n'est pas encore ouvert : il attend le moteur de constats et les textes des mails." };
   if (!ids.success) return { ok: false, error: `Sélectionne entre 1 et ${MAX_PER_CAMPAIGN} entreprises.` };
 
   const wanted = new Set(ids.data);
@@ -34,23 +35,35 @@ export async function createCampaignAction(name: string, offer: string, companyI
     .where(and(eq(schema.mailCampaignItems.status, "en_cours"), inArray(schema.mailCampaigns.status, ["active", "pause"])));
   const inCampaign = new Set(active.map((a) => a.companyId));
 
+  const target = serviceOf(o.data);
+  const history = await crossHistories(target);
+  const t = today();
+  const rest = restDays();
   const eligible: string[] = [];
-  const excluded: Partial<Record<Exclusion, number>> = {};
+  const excluded: Partial<Record<EntryExclusion, number>> = {};
   for (const p of (await prospectList()).filter((p) => wanted.has(p.id))) {
-    const ex = exclusionOf({ id: p.id, name: p.name, stage: p.stage, email: p.email }, optouts, inCampaign);
+    const ex = entryExclusion({ id: p.id, name: p.name, stage: p.stage, email: p.email }, optouts, inCampaign, target, history.get(p.id), t, rest);
     if (ex) excluded[ex] = (excluded[ex] ?? 0) + 1;
     else eligible.push(p.id);
   }
-  if (!eligible.length) return { ok: false, error: "Aucune des entreprises choisies n'est éligible (e-mail manquant, perdue, désinscrite ou déjà en campagne)." };
+  if (!eligible.length) return { ok: false, error: "Aucune des entreprises choisies n'est éligible (e-mail manquant, perdue, désinscrite, déjà en campagne ou en délai de repos)." };
 
-  const t = today();
-  const camp = (await db.insert(schema.mailCampaigns).values({ name: n.data, offer: o.data }).returning({ id: schema.mailCampaigns.id }))[0];
-  await db.insert(schema.mailCampaignItems).values(eligible.map((companyId) => ({ campaignId: camp.id, companyId, nextStep: 0, nextDue: t })));
+  // Campagne et entrées dans la même transaction : si une entreprise vient d'entrer dans une autre séquence (index unique), rien n'est créé.
+  let camp: { id: string };
+  try {
+    camp = await db.transaction(async (tx) => {
+      const c = (await tx.insert(schema.mailCampaigns).values({ name: n.data, offer: o.data }).returning({ id: schema.mailCampaigns.id }))[0];
+      await tx.insert(schema.mailCampaignItems).values(eligible.map((companyId) => ({ campaignId: c.id, companyId, nextStep: 0, nextDue: t })));
+      return c;
+    });
+  } catch {
+    return { ok: false, error: "Une des entreprises vient d'entrer dans une autre campagne : recharge la page et relance." };
+  }
   await logEvent(db, null, "mail", `Campagne « ${n.data} » créée : ${eligible.length} entreprise(s)`);
   const run = await runCampaigns({ campaignId: camp.id });
   revalidatePath("/campagnes");
   revalidatePath("/", "layout");
-  const ex = Object.entries(excluded).map(([k, v]) => `${v} ${EXCLUSION_LABEL[k as Exclusion]}`).join(", ");
+  const ex = Object.entries(excluded).map(([k, v]) => `${v} ${ENTRY_EXCLUSION_LABEL[k as EntryExclusion]}`).join(", ");
   return { ok: true, message: `Campagne créée (${eligible.length} entreprise(s)${ex ? `, ${ex} exclue(s)` : ""}). ${run.message}` };
 }
 

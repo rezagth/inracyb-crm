@@ -4,7 +4,7 @@
  * Dates « métier » (émission, échéance…) au format AAAA-MM-JJ ; horodatages en millisecondes.
  */
 import { pgTable, text, integer, doublePrecision, boolean, timestamp, index, uniqueIndex } from "drizzle-orm/pg-core";
-import { relations } from "drizzle-orm";
+import { relations, sql } from "drizzle-orm";
 import { createId } from "../lib/ids";
 
 const id = () => text("id").primaryKey().$defaultFn(createId);
@@ -281,7 +281,7 @@ export const mailSends = pgTable(
   (t) => [index("mail_sends_idx").on(t.companyId, t.offer)],
 );
 
-/** Campagnes d'envoi en masse : une offre, une séquence J0 / J+3 / J+7 / J+14, des entreprises. status : active | pause | terminee */
+/** Campagnes d'envoi en masse : une offre (audit | ciso | ia | diagnostic), une séquence J0 / J+3 / J+7 / J+14, des entreprises. status : active | pause | terminee */
 export const mailCampaigns = pgTable("mail_campaigns", {
   id: id(),
   name: text("name").notNull(),
@@ -304,7 +304,12 @@ export const mailCampaignItems = pgTable(
     lastError: text("last_error").notNull().default(""),
     createdAt: createdAt(),
   },
-  (t) => [uniqueIndex("mail_campaign_items_uq").on(t.campaignId, t.companyId), index("mail_campaign_items_due_idx").on(t.status, t.nextDue)],
+  (t) => [
+    uniqueIndex("mail_campaign_items_uq").on(t.campaignId, t.companyId),
+    index("mail_campaign_items_due_idx").on(t.status, t.nextDue),
+    // Une seule séquence en cours par entreprise, toutes campagnes et tous services confondus.
+    uniqueIndex("mail_campaign_items_active_uq").on(t.companyId).where(sql`${t.status} = 'en_cours'`),
+  ],
 );
 
 /** Adresses qui ne veulent plus être contactées (en minuscules). Aucun envoi de campagne n'est fait vers elles. */

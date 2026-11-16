@@ -1,6 +1,8 @@
 import { timingSafeEqual } from "node:crypto";
 import { NextResponse, type NextRequest } from "next/server";
-import { recordRun, runCampaigns, runFailed } from "@/server/campaigns";
+import { isFrenchHoliday } from "@/lib/campaign";
+import { today } from "@/lib/format";
+import { recordRun, runCampaigns, runFailed, type RunSummary } from "@/server/campaigns";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -13,7 +15,8 @@ export async function GET(req: NextRequest) {
   const a = Buffer.from(secret);
   const b = Buffer.from(given);
   if (secret.length < 16 || a.length !== b.length || !timingSafeEqual(a, b)) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
-  const r = await runCampaigns();
+  // Jour férié : aucun envoi automatique, les mails dus partent au prochain jour ouvré (l'envoi manuel reste possible).
+  const r: RunSummary = isFrenchHoliday(today()) ? { ok: true, sent: 0, stopped: 0, errors: 0, waiting: 0, message: "Jour férié : aucun envoi automatique aujourd'hui." } : await runCampaigns();
   await recordRun("cron", r);
   // Statut 500 en cas d'échec : Vercel marque alors le déclenchement en erreur (visible dans Logs / Cron Jobs), et la page Campagnes l'affiche.
   return NextResponse.json({ ok: !runFailed(r), sent: r.sent, stopped: r.stopped, errors: r.errors, waiting: r.waiting, message: r.message }, { status: runFailed(r) ? 500 : 200 });
