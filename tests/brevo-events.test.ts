@@ -12,7 +12,8 @@ test("événements Brevo : les rebonds durs, spam, blocages et adresses invalide
 
 test("événements Brevo : un rebond temporaire est noté sans écarter l'adresse, le reste est ignoré", () => {
   assert.deepEqual(classifyBrevoEvent("soft_bounce")?.suppress, false);
-  for (const e of ["delivered", "opened", "click", "request", "deferred", "", 42, null, undefined]) assert.equal(classifyBrevoEvent(e), null, String(e));
+  assert.deepEqual(classifyBrevoEvent("delivered"), { kind: "delivre", reason: "Délivré", suppress: false }); // gardé pour le bilan, sans effet sur l'adresse
+  for (const e of ["opened", "click", "request", "deferred", "", 42, null, undefined]) assert.equal(classifyBrevoEvent(e), null, String(e));
 });
 
 test("déclenchement : échec s'il ne démarre pas ou si tout ce qui devait partir a échoué", () => {

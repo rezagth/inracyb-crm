@@ -11,6 +11,8 @@ import { siteFromNotes } from "@/lib/contact-extract";
 import { DIAGNOSTIC_FRESH_DAYS, hookOf, parseChecks, targetsOf, usableDiagnostic } from "@/lib/diagnostic";
 import { HOOK_LABEL, isHookVariant, segmentOfSector } from "@/lib/diagnostic-mails";
 import { latestDiagnostics } from "@/server/diagnostic";
+import { buildReport, MIN_SAMPLE, verdicts } from "@/lib/campaign-report";
+import { prospectRecords } from "@/server/campaign-report";
 import { PageHeader } from "@/components/ui";
 import { Campagnes } from "./campagnes";
 
@@ -82,6 +84,17 @@ export default async function CampagnesPage() {
   } catch {
     health = { ...health, missing: true };
   }
+  // Bilan : tout, puis les cohortes dont le premier mail date d'au moins 14 et 30 jours.
+  const records = await prospectRecords();
+  const view = (key: string, label: string, note: string, horizon: 14 | 30 | null) => {
+    const rows = buildReport(records, t, horizon);
+    return { key, label, note, rows, verdicts: verdicts(rows) };
+  };
+  const bilan = [
+    view("tout", "Tout", "Toutes les entreprises contactées, quel que soit leur avancement dans la séquence.", null),
+    view("j14", "À J+14", "Entreprises dont le premier mail date d'au moins 14 jours (séquence terminée) ; rendez-vous et devis des 14 premiers jours.", 14),
+    view("j30", "À J+30", "Entreprises dont le premier mail date d'au moins 30 jours ; rendez-vous et devis des 30 premiers jours.", 30),
+  ];
   const offers = s.offers.split(",").filter((x): x is "audit" | "ciso" | "ia" => ["audit", "ciso", "ia"].includes(x));
   return (
     <>
@@ -96,6 +109,7 @@ export default async function CampagnesPage() {
         diagnostic={{ limit: state.diagnostic.limit, sent: state.diagnostic.sent, stage: state.diagnostic.ramp.stage, stages: state.diagnostic.ramp.stages, target: state.diagnostic.ramp.target, every: RAMP_EVERY, firstSendOn: state.diagnostic.firstSendOn }}
         total={{ limit: state.total.limit, sent: state.total.sent }}
         restDays={rest}
+        bilan={{ views: bilan, minSample: MIN_SAMPLE }}
         diag={{ prospects: diagProspects, rows: diagRows, pending: diagPending, freshDays: DIAGNOSTIC_FRESH_DAYS, candidates: diagCandidates }}
         status={{ audit: statusOf("audit"), diagnostic: statusOf("diagnostic") }}
         pauseRule={{ windowDays: PAUSE_RULE.windowDays, minSends: PAUSE_RULE.minSends, maxBounceRate: PAUSE_RULE.maxBounceRate }}

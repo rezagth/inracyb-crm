@@ -11,6 +11,7 @@ import { SERVICE_KEYS, SERVICE_LABEL, STEP_LABELS, type ServiceKey } from "@/lib
 import { fd } from "@/lib/format";
 import { Diagnostics, type DiagCandidate, type DiagProspect, type DiagRow } from "./diagnostics";
 import { SEGMENT_LABEL, isSegment } from "@/lib/diagnostic-mails";
+import { Bilan, type BilanView } from "./bilan";
 
 type P = { id: string; name: string; sector: string; email: string; why: string | null };
 type Item = { id: string; company: string; step: number; due: string; status: string; reason: string; error: string };
@@ -22,7 +23,7 @@ type Diag = { limit: number; sent: number; stage: number; stages: number[]; targ
 
 const STATUS: Record<string, string> = { active: "En cours", pause: "En pause", terminee: "Terminée" };
 
-export function Campagnes({ prospects, offers, ready, urlOk, dailyLimit, sentToday, diagnostic, total, restDays, diag, status, pauseRule, fromEmail, health, campaigns: allCampaigns }: { prospects: P[]; offers: OfferKey[]; ready: boolean; urlOk: boolean; dailyLimit: number; sentToday: number; diagnostic: Diag; total: { limit: number; sent: number }; restDays: number; diag: { prospects: DiagProspect[]; rows: DiagRow[]; pending: number; freshDays: number; candidates: DiagCandidate[] }; status: Record<ServiceKey, Status>; pauseRule: { windowDays: number; minSends: number; maxBounceRate: number }; fromEmail: string; health: Health; campaigns: C[] }) {
+export function Campagnes({ prospects, offers, ready, urlOk, dailyLimit, sentToday, diagnostic, total, restDays, diag, bilan, status, pauseRule, fromEmail, health, campaigns: allCampaigns }: { prospects: P[]; offers: OfferKey[]; ready: boolean; urlOk: boolean; dailyLimit: number; sentToday: number; diagnostic: Diag; total: { limit: number; sent: number }; restDays: number; bilan: { views: BilanView[]; minSample: number }; diag: { prospects: DiagProspect[]; rows: DiagRow[]; pending: number; freshDays: number; candidates: DiagCandidate[] }; status: Record<ServiceKey, Status>; pauseRule: { windowDays: number; minSends: number; maxBounceRate: number }; fromEmail: string; health: Health; campaigns: C[] }) {
   const router = useRouter();
   const toast = useToast();
   const [pending, start] = useTransition();
@@ -230,6 +231,8 @@ export function Campagnes({ prospects, offers, ready, urlOk, dailyLimit, sentTod
           </div>
         )}
       </Card>
+
+      <Bilan views={bilan.views} minSample={bilan.minSample} />
     </div>
   );
 }

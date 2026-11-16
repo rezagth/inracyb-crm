@@ -445,3 +445,33 @@ test("file de diagnostics : lots, budget de temps, reprise, entreprise sans doma
   assert.deepEqual([crash.done, crash.waiting], [1, 0]);
   assert.equal((await latestDiagnostics()).get(ids[1])!.certainCount, 0);
 });
+
+// ——— Phase E : bilan par service et segment ———
+
+test("bilan : les entreprises des campagnes sont classées par service et segment, avec réponses, rebonds, rendez-vous, devis et accusés de remise", async () => {
+  const { prospectRecords } = await import("../src/server/campaign-report");
+  const { buildReport } = await import("../src/lib/campaign-report");
+  const hook = await import("../src/app/api/webhooks/brevo/route");
+  const before = await prospectRecords();
+  assert.ok(before.length > 0);
+  assert.ok(before.every((r) => r.delivered === null)); // aucun accusé de remise reçu : inconnu, pas zéro
+  // Brevo confirme une remise pour une entreprise du diagnostic ; elle prend rendez-vous et accepte un devis.
+  const url = "https://crm.test/api/webhooks/brevo?key=secret-webhook-de-test-123456";
+  const res = await hook.POST(Object.assign(new Request(url, { method: "POST", body: JSON.stringify({ event: "delivered", email: "contact@diag1.fr", tags: ["crm", "campagne", "diagnostic", "J0"] }) }), { nextUrl: new URL(url) }) as never);
+  assert.equal(res.status, 200);
+  assert.equal((await db.select().from(schema.mailOptouts)).some((o) => o.email === "contact@diag1.fr"), false); // un accusé de remise n'écarte pas l'adresse
+  await db.insert(schema.meetings).values({ companyId: diagIds[0], title: "Visio", date: T });
+  await db.insert(schema.quotes).values({ number: "D-TEST-001", companyId: diagIds[0], subject: "Audit", status: "accepte", issueDate: T, validUntil: T });
+
+  const records = await prospectRecords();
+  const rows = buildReport(records, T, null);
+  const diag = rows.find((r) => r.service === "diagnostic" && r.segment === "cabinets")!;
+  assert.equal(diag.label, "Diagnostic · Cabinets comptables, juridiques, courtiers");
+  assert.deepEqual([diag.delivered, diag.meetings, diag.signed], [1, 1, 1]);
+  assert.ok(diag.contacted >= 4 && diag.mails >= diag.contacted);
+  const audit = rows.find((r) => r.service === "audit" && r.segment === "cabinets")!; // secteur Juridique
+  assert.ok(audit.contacted >= 10);
+  assert.ok(audit.replied >= 2 && audit.optedOut >= 1);
+  assert.equal(audit.delivered, 0); // des accusés existent désormais, aucun pour l'audit
+  assert.equal(rows.reduce((a, r) => a + r.contacted, 0), records.filter((r) => r.firstSend).length);
+});

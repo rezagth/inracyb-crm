@@ -4,7 +4,7 @@
  * écarte l'adresse de toute campagne : on ne lui écrit plus jamais.
  */
 
-export type EventKind = "rebond" | "rebond_temporaire" | "spam" | "bloque" | "invalide" | "desinscrit";
+export type EventKind = "rebond" | "rebond_temporaire" | "spam" | "bloque" | "invalide" | "desinscrit" | "delivre";
 
 export type Classified = { kind: EventKind; /** raison affichée sur la campagne */ reason: string; /** true : l'adresse est écartée définitivement */ suppress: boolean };
 
@@ -14,10 +14,13 @@ export const BOUNCE_REASONS: string[] = [REASON.rebond, REASON.bloque, REASON.in
 
 const norm = (e: string) => e.toLowerCase().replace(/[^a-z]/g, "");
 
-/** Traduit le nom d'événement de Brevo (hard_bounce, hardBounce…). Les événements sans intérêt (delivered, opened…) renvoient null. */
+/** Traduit le nom d'événement de Brevo (hard_bounce, hardBounce…). Les événements sans intérêt (opened, click…) renvoient null. */
 export function classifyBrevoEvent(event: unknown): Classified | null {
   if (typeof event !== "string") return null;
   switch (norm(event)) {
+    case "delivered":
+      // Simple accusé de remise, gardé pour le bilan des campagnes : aucun effet sur l'adresse.
+      return { kind: "delivre", reason: "Délivré", suppress: false };
     case "hardbounce":
       return { kind: "rebond", reason: REASON.rebond, suppress: true };
     case "softbounce":

@@ -87,3 +87,9 @@ Prérequis côté Brevo : domaine infracyb.fr authentifié, expéditeur contact@
 - Avant J0 et J+3, le domaine est mesuré de nouveau. Constat corrigé : la séquence s'arrête. Mesure impossible ce jour-là : rien ne part, nouvel essai au passage suivant.
 - Un champ obligatoire vide (prénom, entreprise, domaine, date du certificat, nom dans Paramètres, signature) : le mail ne part pas et l'erreur s'affiche sur la ligne de la campagne.
 - Migration : section « Phase D » de `drizzle-manuel-diagnostic.sql`, ou `npm run db:migrate`, avant de déployer.
+
+### Bilan par service et par segment
+
+- Page Campagnes, section « Bilan » : entreprises contactées, mails, délivrées, rebonds, plaintes, désinscriptions, réponses, rendez-vous, devis acceptés, avec les taux. Trois vues : tout, cohorte à J+14, cohorte à J+30.
+- Colonne « Délivrées » : cocher l'événement « Délivré » (delivered) dans le webhook Brevo. Sans lui, la colonne affiche « — ».
+- Aucune comparaison en dessous de 30 entreprises par ligne ; au-delà, un écart n'est retenu que s'il dépasse la marge d'incertitude.
