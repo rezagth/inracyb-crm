@@ -78,3 +78,12 @@ Prérequis côté Brevo : domaine infracyb.fr authentifié, expéditeur contact@
 - File d'attente traitée par lots dans un budget de temps ; le reste est repris par la tâche planifiée `/api/cron/diagnostics` (jours ouvrés, 6 h 30 UTC, même `CRON_SECRET`).
 - Un prospect n'entre dans la séquence que s'il a au moins un constat certain, mesuré depuis 14 jours au plus. Rapport d'une page : lien « Rapport » de l'onglet Diagnostic (Imprimer > Enregistrer en PDF).
 - Migration : `npm run db:migrate`, ou la section « Phase C » de `drizzle-manuel-diagnostic.sql`, avant de déployer.
+
+### Séquence et textes du service Diagnostic
+
+- Les textes viennent de `textes-campagne-diagnostic-v2.md` et sont repris à l'identique dans `src/lib/diagnostic-mails.ts`. Pour changer une phrase : modifier les deux fichiers ; `npm test` échoue s'ils diffèrent d'un caractère.
+- Une campagne Diagnostic porte un segment (éditeurs / ESN / agences, ou cabinets). Seules les entreprises d'un secteur du segment y entrent : Numérique pour le premier ; Expertise comptable, Juridique, Notariat, Courtage pour le second.
+- Accroches possibles : SPF absent, en double, en `+all` ; DMARC absent ou en `p=none` ; certificat expiré ou expirant sous 14 jours. HSTS n'est qu'un constat secondaire (J+3) : seul, il n'ouvre pas la campagne.
+- Avant J0 et J+3, le domaine est mesuré de nouveau. Constat corrigé : la séquence s'arrête. Mesure impossible ce jour-là : rien ne part, nouvel essai au passage suivant.
+- Un champ obligatoire vide (prénom, entreprise, domaine, date du certificat, nom dans Paramètres, signature) : le mail ne part pas et l'erreur s'affiche sur la ligne de la campagne.
+- Migration : section « Phase D » de `drizzle-manuel-diagnostic.sql`, ou `npm run db:migrate`, avant de déployer.

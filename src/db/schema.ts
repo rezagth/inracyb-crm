@@ -288,6 +288,8 @@ export const mailCampaigns = pgTable("mail_campaigns", {
   id: id(),
   name: text("name").notNull(),
   offer: text("offer").notNull(),
+  /** Segment visé (campagnes diagnostic) : editeurs | cabinets ; "" pour les autres offres. Choisit le texte des mails et sert au bilan. */
+  segment: text("segment").notNull().default(""),
   status: text("status").notNull().default("active"),
   createdAt: createdAt(),
 });
@@ -304,6 +306,8 @@ export const mailCampaignItems = pgTable(
     status: text("status").notNull().default("en_cours"),
     stopReason: text("stop_reason").notNull().default(""),
     lastError: text("last_error").notNull().default(""),
+    /** Diagnostic : forme du constat cité dans le premier mail (« dmarc-absent »…). Les relances parlent du même constat. */
+    hook: text("hook").notNull().default(""),
     createdAt: createdAt(),
   },
   (t) => [

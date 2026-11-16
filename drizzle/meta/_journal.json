@@ -36,6 +36,13 @@
       "when": 1794845317067,
       "tag": "0004_tired_joshua_kane",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1794846012905,
+      "tag": "0005_jazzy_namorita",
+      "breakpoints": true
     }
   ]
 }

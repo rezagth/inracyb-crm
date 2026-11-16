@@ -11,7 +11,7 @@ import { migrate } from "drizzle-orm/pglite/migrator";
 import { eq } from "drizzle-orm";
 import * as schema from "../src/db/schema";
 import { scripts } from "../src/lib/prospection";
-import type { Probe } from "../src/lib/diagnostic";
+import type { Dns, HttpInfo, Probe, TlsInfo } from "../src/lib/diagnostic";
 
 process.env.BREVO_API_KEY = "cle-de-test";
 process.env.APP_URL = "https://crm.test";
@@ -57,9 +57,9 @@ let diagIds: string[] = [];
 
 before(async () => {
   await migrate(db, { migrationsFolder: "./drizzle" });
-  await db.insert(schema.settings).values({ id: 1 }).onConflictDoNothing();
+  await db.insert(schema.settings).values({ id: 1, legalName: "Jean Test", phone: "01 02 03 04 05", email: "jean@infracyb.fr" }).onConflictDoNothing();
   for (let i = 1; i <= 12; i++) auditIds.push(await company("Cabinet Audit " + i));
-  for (let i = 1; i <= 6; i++) diagIds.push(await company("Editeur Diag " + i, "site"));
+  for (let i = 1; i <= 6; i++) diagIds.push(await company("Cabinet Diag " + i, "site", `contact@diag${i}.fr`));
 });
 after(async () => {
   globalThis.fetch = realFetch;
@@ -120,58 +120,147 @@ test("une seule séquence par entreprise : refus à la création et en base, tou
   await db.delete(schema.mailCampaigns).where(eq(schema.mailCampaigns.id, camp.id));
 });
 
-test("diagnostic : la création de campagne est fermée tant que le service n'est pas ouvert", async () => {
+// ——— Service Diagnostic : sonde simulée, textes réels ———
+
+const rec = (...values: string[]): Dns => ({ kind: "records", values });
+/** État public simulé de chaque domaine (modifiable d'un test à l'autre : un prospect peut corriger son réglage). */
+const world: { dns: Record<string, Dns>; tls: Record<string, TlsInfo>; home: Record<string, HttpInfo> } = { dns: {}, tls: {}, home: {} };
+const fakeProbe: Probe = {
+  dns: async (name, type) => world.dns[`${type} ${name}`] ?? { kind: "absent" },
+  tls: async (host) => world.tls[host] ?? { kind: "error", detail: "connexion HTTPS impossible" },
+  http: async (url) => world.home[new URL(url).hostname + new URL(url).pathname] ?? { kind: "error", detail: "site introuvable (adresse inconnue)" },
+};
+const okSpf = rec("v=spf1 mx -all");
+const okDmarc = rec("v=DMARC1; p=reject");
+function setWorld() {
+  for (let i = 1; i <= 6; i++) world.dns[`MX diag${i}.fr`] = rec(`10 mx.diag${i}.fr.`);
+  // diag1 : SPF et DMARC absents, HSTS absent · diag2 : DMARC en p=none · diag3 : seulement HSTS absent · diag4 : certificat expiré · diag5, diag6 : DMARC absent
+  world.home["diag1.fr/"] = { kind: "ok", status: 200, url: "https://diag1.fr/", headers: {}, contentType: "text/html", body: "" };
+  Object.assign(world.dns, { "TXT diag2.fr": okSpf, "TXT _dmarc.diag2.fr": rec("v=DMARC1; p=none; rua=mailto:d@diag2.fr") });
+  Object.assign(world.dns, { "TXT diag3.fr": okSpf, "TXT _dmarc.diag3.fr": okDmarc });
+  world.home["diag3.fr/"] = { kind: "ok", status: 200, url: "https://diag3.fr/", headers: {}, contentType: "text/html", body: "" };
+  Object.assign(world.dns, { "TXT diag4.fr": okSpf, "TXT _dmarc.diag4.fr": okDmarc });
+  world.tls["diag4.fr"] = { kind: "ok", validTo: "2026-01-10T00:00:00.000Z", authorized: false, authError: "CERT_HAS_EXPIRED" };
+  Object.assign(world.dns, { "TXT diag5.fr": okSpf, "TXT diag6.fr": okSpf });
+}
+const itemOf = async (companyId: string) => (await db.select().from(schema.mailCampaignItems).where(eq(schema.mailCampaignItems.companyId, companyId)))[0];
+const mailTo = (email: string) => outbox.filter((o) => o.to[0].email === email);
+
+test("diagnostic : segment obligatoire, secteur hors segment et HSTS seul exclus, 4 mails au premier palier même si l'audit est plein", async () => {
   const { createCampaignAction } = await import("../src/server/actions/campaigns");
-  const r = await createCampaignAction("Diag", "diagnostic", diagIds);
-  assert.equal(r.ok, false);
-  assert.match((r as { error: string }).error, /Diagnostic n'est pas encore ouvert/);
-  assert.equal((await db.select().from(schema.mailCampaigns)).filter((c) => c.offer === "diagnostic").length, 0);
-});
-
-test("diagnostic : sans modèle rien ne part ; avec modèle, 4 mails (premier palier) même si l'audit est à son plafond", async () => {
   const { runCampaigns, getDailyState } = await import("../src/server/campaigns");
-  const camp = (await db.insert(schema.mailCampaigns).values({ name: "Editeurs", offer: "diagnostic" }).returning({ id: schema.mailCampaigns.id }))[0];
-  await db.insert(schema.mailCampaignItems).values(diagIds.map((companyId) => ({ campaignId: camp.id, companyId, nextStep: 0, nextDue: T })));
+  const { publicProbe, queueDiagnostics, runDiagnostics } = await import("../src/server/diagnostic");
+  Object.assign(publicProbe, fakeProbe); // aucun réseau : la sonde réelle est remplacée pour tout le fichier
+  setWorld();
 
-  // Barrière de qualité : sans diagnostic, rien ne part, même avec un modèle.
-  const noDiag = await runCampaigns({ mailFor: () => ({ subject: "S", body: "B" }) });
-  assert.equal(noDiag.sent, 0);
-  assert.match((await db.select().from(schema.mailCampaignItems).where(eq(schema.mailCampaignItems.campaignId, camp.id))).map((i) => i.lastError).join("|"), /Pas de constat certain et récent/);
-  // Diagnostic périmé pour la première, récent pour les autres.
-  const { RULES_VERSION } = await import("../src/lib/diagnostic");
-  await db.insert(schema.companyDiagnostics).values(diagIds.map((companyId, i) => ({ companyId, status: "fait", mailDomain: "exemple.fr", certainCount: 1, mainFinding: "spf", rulesVersion: RULES_VERSION, checkedOn: i === 0 ? "2026-01-01" : T })));
+  // Sans diagnostic, ou sans segment : pas de campagne.
+  assert.match(((await createCampaignAction("Diag", "diagnostic", diagIds)) as { error: string }).error, /Choisis le segment/);
+  assert.match(((await createCampaignAction("Diag", "diagnostic", diagIds, "cabinets")) as { error: string }).error, /Aucune des entreprises choisies n'est éligible/);
+  assert.equal(await queueDiagnostics(diagIds), 6);
+  assert.equal((await runDiagnostics({ budgetMs: 40_000 })).done, 6);
+  // Un cabinet (secteur Juridique) n'entre pas dans le segment des éditeurs.
+  assert.match(((await createCampaignAction("Diag", "diagnostic", diagIds, "editeurs")) as { error: string }).error, /Aucune des entreprises choisies n'est éligible/);
 
-  const none = await runCampaigns();
-  assert.equal(none.sent, 0);
-  assert.ok(none.errors >= 4);
-  assert.equal(outbox.length, 10);
-  assert.equal(await sendsOf("diagnostic"), 0);
-  assert.match((await db.select().from(schema.mailCampaignItems).where(eq(schema.mailCampaignItems.campaignId, camp.id))).map((i) => i.lastError).join("|"), /Aucun modèle de mail/);
-
-  const r = await runCampaigns({ mailFor: (offer, p) => (offer === "diagnostic" ? { subject: "Constat " + p.name, body: "Texte" } : null) });
-  assert.equal(r.sent, 4);
+  const before = outbox.length;
+  const r = await createCampaignAction("Cabinets test", "diagnostic", diagIds, "cabinets");
+  assert.ok(r.ok, JSON.stringify(r));
+  // diag3 n'a que HSTS : exclue. 5 entrées, 4 mails (premier palier), alors que l'audit est à 10/10.
+  assert.ok((r as { message: string }).message.startsWith("Campagne créée (5 entreprise(s), 1 pas de constat d'accroche récent (diagnostic à faire ou à refaire) exclue(s)). 4 mail(s) envoyé(s) · 1 en attente"), (r as { message: string }).message);
+  assert.equal(await itemOf(diagIds[2]), undefined);
+  const diag = outbox.slice(before);
+  assert.equal(diag.length, 4);
   assert.equal(await sendsOf("diagnostic"), 4);
   assert.equal(await sendsOf("audit"), 10);
-  const diag = outbox.slice(10);
-  assert.equal(diag.length, 4);
-  assert.ok(diag.every((o) => o.to[0].email !== "editeurdiag1@exemple.fr")); // diagnostic périmé : pas de mail
-  await db.update(schema.companyDiagnostics).set({ checkedOn: T }).where(eq(schema.companyDiagnostics.companyId, diagIds[0]));
   for (const o of diag) {
     assert.equal(o.headers?.["List-Unsubscribe-Post"], "List-Unsubscribe=One-Click");
     assert.match(o.headers?.["List-Unsubscribe"] ?? "", /^<https:\/\/crm\.test\/api\/desabonnement\//);
     assert.deepEqual(o.tags, ["crm", "campagne", "diagnostic", "J0"]);
-    assert.match(o.textContent, /Se désinscrire en un clic : https:\/\/crm\.test\//);
+    assert.match(o.textContent, /\n\nSe désinscrire en un clic : https:\/\/crm\.test\/[^\n]+$/);
+    assert.doesNotMatch(o.subject + o.textContent, /\{[a-z_0-9]+\}|\[mon prénom\]|phishing|^Re:/i);
+    assert.doesNotMatch(o.textContent, /Répondez simplement « stop »/); // la mention de désinscription vient du moteur, pas du texte
   }
+
+  // Le texte : commun au segment, constat propre au domaine, prénom, expéditeur, signature.
+  const m1 = mailTo("contact@diag1.fr")[0];
+  assert.equal(m1.subject, "Un point sur les réglages mail de diag1.fr");
+  assert.ok(m1.textContent.startsWith("Bonjour Anne,\n\nJe suis Jean Test, RSSI externalisé chez InfraCyb. En regardant les réglages publics de diag1.fr, j'ai relevé un point : aucun enregistrement SPF n'est publié pour diag1.fr : les messageries ne peuvent pas vérifier quels serveurs ont le droit d'envoyer en votre nom.\n\nPour un cabinet qui échange chaque jour avec ses clients sur des documents sensibles, c'est un point que les fraudes au faux RIB exploitent régulièrement.\n\nPuis-je vous envoyer le détail, sur une page ?\n\nJean Test\n"));
+  assert.doesNotMatch(m1.textContent, /HSTS/); // jamais dans le premier mail
+  assert.equal(mailTo("contact@diag2.fr")[0].subject, "Un point sur les réglages mail de diag2.fr");
+  assert.match(mailTo("contact@diag2.fr")[0].textContent, /la politique DMARC de diag2\.fr est en mode surveillance \(`p=none`\)/);
+  const m4 = mailTo("contact@diag4.fr")[0];
+  assert.equal(m4.subject, "Le certificat du site diag4.fr");
+  assert.match(m4.textContent, /le certificat du site diag4\.fr a expiré le 10\/01\/2026 : les visiteurs voient un avertissement de sécurité\.\n\nVos clients qui visitent votre site voient cet avertissement, ce qui peut les inquiéter\./);
+  assert.deepEqual([(await itemOf(diagIds[0])).hook, (await itemOf(diagIds[1])).hook, (await itemOf(diagIds[3])).hook], ["spf-absent", "dmarc-none", "tls-expire"]);
 
   const s = await getDailyState();
   assert.deepEqual([s.audit.sent, s.audit.limit, s.diagnostic.sent, s.diagnostic.limit, s.total.sent, s.total.limit], [10, 10, 4, 4, 14, 20]);
   assert.equal(s.diagnostic.firstSendOn, T);
+  const full = await runCampaigns();
+  assert.deepEqual([full.sent, full.waiting], [0, 3]);
+  assert.match(full.message, /^Plafond du jour atteint \(Audit 10\/10, Diagnostic 4\/4\)\. 3 mail\(s\) en attente : ils partiront demain\.$/);
+});
 
-  const full = await runCampaigns({ mailFor: () => ({ subject: "S", body: "B" }) });
-  assert.equal(full.sent, 0);
-  assert.equal(full.waiting, 4);
-  assert.match(full.message, /^Plafond du jour atteint \(Audit 10\/10, Diagnostic 4\/4\)\. 4 mail\(s\) en attente : ils partiront demain\.$/);
-  assert.equal(outbox.length, 14);
+test("diagnostic : relances J+3, J+7, J+14 ; constat remesuré avant l'envoi ; arrêt si le constat a été corrigé", async () => {
+  const { runCampaigns } = await import("../src/server/campaigns");
+  // Les jours passent : les envois diagnostic sont antidatés, les relances de diag1, diag2 et diag4 arrivent à échéance.
+  const due = async (ids: string[]) => {
+    await db.update(schema.mailSends).set({ sentOn: "2026-01-05" }).where(eq(schema.mailSends.offer, "diagnostic"));
+    for (const id of ids) await db.update(schema.mailCampaignItems).set({ nextDue: T }).where(eq(schema.mailCampaignItems.companyId, id));
+  };
+  await db.update(schema.mailCampaignItems).set({ nextDue: "2099-01-01" }).where(eq(schema.mailCampaignItems.status, "en_cours"));
+  await due([diagIds[0], diagIds[1], diagIds[3]]);
+  world.dns["TXT _dmarc.diag2.fr"] = okDmarc; // diag2 a durci sa politique entre-temps
+  world.tls["diag4.fr"] = { kind: "error", detail: "délai dépassé" }; // diag4 : site injoignable aujourd'hui
+
+  const r = await runCampaigns();
+  assert.deepEqual([r.sent, r.stopped, r.errors], [1, 1, 1]);
+  // diag1 : J+3 avec la piste corrective du même constat et le constat secondaire HSTS.
+  const j3 = mailTo("contact@diag1.fr")[1];
+  assert.equal(j3.subject, "Précision sur diag1.fr");
+  assert.ok(j3.textContent.startsWith("Bonjour Anne,\n\nUne précision utile sur le point relevé pour diag1.fr : il s'agit de publier un enregistrement SPF qui liste les services autorisés à envoyer en votre nom (messagerie, outil d'envoi, etc.). J'ai aussi noté que le site n'envoie pas l'en-tête HSTS, un réglage simple à ajouter côté serveur.\n\nJe vous envoie volontiers la page de synthèse si cela peut vous servir.\n\nJean Test\n"));
+  assert.deepEqual(j3.tags, ["crm", "campagne", "diagnostic", "J+3"]);
+  // diag2 : constat corrigé, la séquence s'arrête sans rien envoyer.
+  const i2 = await itemOf(diagIds[1]);
+  assert.deepEqual([i2.status, i2.stopReason], ["arrete", "Constat corrigé ou modifié depuis le premier mail"]);
+  assert.equal(mailTo("contact@diag2.fr").length, 1);
+  // diag4 : mesure impossible aujourd'hui, rien ne part, la séquence attend.
+  const i4 = await itemOf(diagIds[3]);
+  assert.deepEqual([i4.status, i4.nextStep], ["en_cours", 1]);
+  assert.match(i4.lastError, /non revérifiable aujourd'hui/);
+  assert.equal(mailTo("contact@diag4.fr").length, 1);
+
+  // J+7 puis J+14 pour diag1 : textes du segment, sans nouvelle mesure, puis fin de séquence.
+  await db.update(schema.mailCampaignItems).set({ nextDue: "2099-01-01" }).where(eq(schema.mailCampaignItems.companyId, diagIds[3]));
+  await due([diagIds[0]]);
+  assert.equal((await runCampaigns()).sent, 1);
+  await due([diagIds[0]]);
+  assert.equal((await runCampaigns()).sent, 1);
+  const [, , j7, j14] = mailTo("contact@diag1.fr");
+  assert.equal(j7.subject, "Vos clients et les messages à votre nom");
+  assert.match(j7.textContent, /ce que je regarderais en priorité chez Cabinet Diag 1\. Cela vous serait utile \?/);
+  assert.equal(j14.subject, "Dernier message de ma part");
+  assert.match(j14.textContent, /Si le sujet devient utile pour Cabinet Diag 1, la synthèse d'une page sur diag1\.fr reste disponible : il suffit de me répondre\.\n\nBonne continuation,\n\nJean Test/);
+  const i1 = await itemOf(diagIds[0]);
+  assert.deepEqual([i1.status, i1.stopReason], ["termine", "Séquence terminée"]);
+
+  // Premier mail : si le constat a disparu avant l'envoi, la séquence s'arrête sans mail.
+  world.dns["TXT _dmarc.diag5.fr"] = okDmarc;
+  const pending = (await db.select().from(schema.mailCampaignItems).where(eq(schema.mailCampaignItems.status, "en_cours"))).filter((i) => i.nextStep === 0 && diagIds.includes(i.companyId));
+  assert.equal(pending.length, 1);
+  const gone = pending[0].companyId === diagIds[4];
+  await due([pending[0].companyId]);
+  const last = await runCampaigns();
+  assert.deepEqual([last.sent, last.stopped], gone ? [0, 1] : [1, 0]);
+  if (gone) assert.equal((await itemOf(diagIds[4])).stopReason, "Plus de constat à la date d'envoi");
+  // Un contact sans prénom (adresse générique « Standard ») : champ obligatoire vide, le mail ne part pas.
+  const generic = await company("Cabinet Générique", "site", "contact@diag6.fr");
+  await db.update(schema.contacts).set({ firstName: "Standard" }).where(eq(schema.contacts.companyId, generic));
+  const camp = (await db.select().from(schema.mailCampaigns).where(eq(schema.mailCampaigns.offer, "diagnostic")))[0];
+  await db.insert(schema.mailCampaignItems).values({ campaignId: camp.id, companyId: generic, nextStep: 0, nextDue: T });
+  const g = await runCampaigns();
+  assert.equal(g.sent, 0);
+  assert.match((await itemOf(generic)).lastError, /Champ obligatoire vide : prenom/);
+  await db.update(schema.mailCampaignItems).set({ status: "arrete", stopReason: "Test" }).where(eq(schema.mailCampaignItems.companyId, generic));
 });
 
 test("délai de repos : une entreprise contactée en audit aujourd'hui n'entre pas dans le diagnostic ; une réponse ferme la porte", async () => {

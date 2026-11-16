@@ -8,7 +8,7 @@
  */
 import { fd } from "./format";
 
-export const RULES_VERSION = "2026-11-16.1";
+export const RULES_VERSION = "2026-11-16.2";
 
 /** Réponse DNS : enregistrements trouvés, absence confirmée, ou mesure impossible (erreur, délai, résolveurs en désaccord). */
 export type Dns = { kind: "records"; values: string[] } | { kind: "absent" } | { kind: "error"; detail: string };
@@ -39,11 +39,25 @@ export type Check = {
   wording: string;
   /** ordre d'importance (1 = le plus parlant) */
   rank: number;
+  /** forme précise du constat (« spf-absent », « dmarc-none »…), "" quand aucune forme connue ne s'applique */
+  variant: string;
+  /** données du constat reprises dans un mail (fin de validité du certificat, AAAA-MM-JJ) */
+  data?: { validTo?: string };
 };
-export type Diagnostic = { mailDomain: string; webHost: string; checkedOn: string; rulesVersion: string; checks: Check[]; /** id du constat principal, "" s'il n'y en a aucun de certain */ main: string; certainCount: number };
+export type Diagnostic = { mailDomain: string; webHost: string; checkedOn: string; rulesVersion: string; checks: Check[]; /** id du constat d'accroche, "" s'il n'y en a aucun (aucun constat certain, ou seulement des constats secondaires) */ main: string; certainCount: number };
 
-/** Constats utilisables dans un mail : écart mesuré et certain. */
+/** Constats certains : écart mesuré, sans interprétation. */
 export const mailable = (c: Check): boolean => c.status === "constat" && c.certain;
+
+/**
+ * Formes de constat qui peuvent ouvrir un mail (accroche principale). Tout le reste, HSTS compris, ne peut être
+ * qu'un constat secondaire : un domaine dont le seul constat est secondaire n'entre pas dans la campagne.
+ */
+export const HOOK_VARIANTS = ["tls-expire", "spf-absent", "spf-double", "spf-plus-all", "dmarc-absent", "dmarc-none", "tls-bientot"] as const;
+export type HookVariant = (typeof HOOK_VARIANTS)[number];
+export const isHook = (c: Check): boolean => mailable(c) && (HOOK_VARIANTS as readonly string[]).includes(c.variant);
+/** Le constat d'accroche le plus parlant, s'il y en a un. */
+export const hookOf = (checks: Check[]): Check | undefined => [...checks].sort((a, b) => a.rank - b.rank).find(isHook);
 
 /** Nettoie une valeur venue de l'extérieur avant de l'afficher : caractères de contrôle retirés, longueur bornée. */
 export function clean(s: unknown, max = 200): string {
@@ -104,7 +118,7 @@ function unquoteTxt(data: string): string {
   return parts ? parts.map((p) => p.slice(1, -1).replace(/\\(.)/g, "$1")).join("") : data;
 }
 
-const mk = (id: string, label: string, rank: number, status: CheckStatus, certain: boolean, proof: string, wording: string): Check => ({ id, label, status, certain, proof: clean(proof, 400), wording, rank });
+const mk = (id: string, label: string, rank: number, status: CheckStatus, certain: boolean, proof: string, wording: string, variant = "", data?: Check["data"]): Check => ({ id, label, status, certain, proof: clean(proof, 400), wording, rank, variant, ...(data ? { data } : {}) });
 const unknown = (id: string, label: string, rank: number, what: string, r: { detail: string }): Check => mk(id, label, rank, "erreur", false, `Mesure impossible : ${clean(r.detail, 120)}`, `${what} n'a pas pu être vérifié (${clean(r.detail, 120)}). Aucune conclusion.`);
 
 // ——— Messagerie ———
@@ -129,12 +143,12 @@ export function evalSpf(domain: string, txt: Dns, mx: Dns, on: string): Check {
   const spf = txt.kind === "records" ? txt.values.filter((v) => /^v=spf1(\s|$)/i.test(v.trim())) : [];
   if (spf.length === 0) {
     const w = `Le ${fd(on)}, le domaine ${domain} ne publiait pas d'enregistrement SPF. Sans SPF, les serveurs destinataires ne peuvent pas vérifier quels serveurs ont le droit d'envoyer des e-mails au nom de ${domain}.`;
-    return mk("spf", L, 2, receives ? "constat" : "info", receives, `Aucun enregistrement TXT « v=spf1 » sur ${domain}`, w);
+    return mk("spf", L, 2, receives ? "constat" : "info", receives, `Aucun enregistrement TXT « v=spf1 » sur ${domain}`, w, "spf-absent");
   }
-  if (spf.length > 1) return mk("spf", L, 2, receives ? "constat" : "info", receives, `${spf.length} enregistrements « v=spf1 » sur ${domain}`, `Le ${fd(on)}, le domaine ${domain} publiait ${spf.length} enregistrements SPF. La norme n'en admet qu'un : dans ce cas la vérification SPF échoue chez les destinataires.`);
+  if (spf.length > 1) return mk("spf", L, 2, receives ? "constat" : "info", receives, `${spf.length} enregistrements « v=spf1 » sur ${domain}`, `Le ${fd(on)}, le domaine ${domain} publiait ${spf.length} enregistrements SPF. La norme n'en admet qu'un : dans ce cas la vérification SPF échoue chez les destinataires.`, spf.length === 2 ? "spf-double" : "");
   const rec = spf[0].trim();
   const all = /(?:^|\s)([+\-~?]?)all(?:\s|$)/i.exec(rec);
-  if (all && (all[1] === "+" || all[1] === "")) return mk("spf", L, 2, receives ? "constat" : "info", receives, rec, `Le ${fd(on)}, l'enregistrement SPF de ${domain} se terminait par « +all » : il autorise n'importe quel serveur à envoyer des e-mails au nom du domaine.`);
+  if (all && (all[1] === "+" || all[1] === "")) return mk("spf", L, 2, receives ? "constat" : "info", receives, rec, `Le ${fd(on)}, l'enregistrement SPF de ${domain} contenait la règle « ${all[1]}all » : il autorise n'importe quel serveur à envoyer des e-mails au nom du domaine.`, /\+all$/i.test(rec) ? "spf-plus-all" : "");
   if (all && all[1] === "?") return mk("spf", L, 2, "info", true, rec, `L'enregistrement SPF de ${domain} se termine par « ?all » (neutre) : il ne dit pas aux destinataires de se méfier des autres serveurs.`);
   if (!all && !/(?:^|\s)redirect=/i.test(rec)) return mk("spf", L, 2, "info", false, rec, `L'enregistrement SPF de ${domain} ne contient pas de règle finale « all » : à vérifier.`);
   return mk("spf", L, 2, "conforme", true, rec, `Le domaine ${domain} publie un enregistrement SPF.`);
@@ -162,12 +176,12 @@ export function evalDmarc(domain: string, lookups: { name: string; res: Dns }[],
     const tag = (k: string) => new RegExp(`(?:^|;)\\s*${k}\\s*=\\s*([a-z]+)\\s*(?:;|$)`, "i").exec(rec)?.[1]?.toLowerCase() ?? "";
     const policy = (inherited && tag("sp")) || tag("p");
     if (policy === "reject" || policy === "quarantine") return mk("dmarc", L, 3, "conforme", true, rec, `Le domaine ${domain} publie une politique DMARC (${policy}).`);
-    if (policy === "none") return mk("dmarc", L, 4, receives ? "constat" : "info", receives, rec, `Le ${fd(on)}, la politique DMARC de ${domain} était en mode observation (« p=none ») : les e-mails qui usurpent le domaine sont signalés dans des rapports, mais pas bloqués par les destinataires.`);
+    if (policy === "none") return mk("dmarc", L, 4, receives ? "constat" : "info", receives, rec, `Le ${fd(on)}, la politique DMARC de ${domain} était en mode observation (« p=none ») : les e-mails qui usurpent le domaine sont signalés dans des rapports, mais pas bloqués par les destinataires.`, tag("p") === "none" && policy === tag("p") ? "dmarc-none" : "");
     return mk("dmarc", L, 3, "info", false, rec, `L'enregistrement DMARC de ${domain} n'indique pas de politique reconnue : à vérifier.`);
   }
   if (!lookups.length) return mk("dmarc", L, 3, "erreur", false, "Aucune mesure", "La politique DMARC n'a pas pu être vérifiée. Aucune conclusion.");
   const w = `Le ${fd(on)}, le domaine ${domain} ne publiait pas de politique DMARC. Sans DMARC, les destinataires n'ont pas de consigne pour rejeter les e-mails qui usurpent le nom de ${domain}.`;
-  return mk("dmarc", L, 3, receives ? "constat" : "info", receives, `Aucun enregistrement « v=DMARC1 » sur ${lookups.map((l) => l.name).join(", ")}`, w);
+  return mk("dmarc", L, 3, receives ? "constat" : "info", receives, `Aucun enregistrement « v=DMARC1 » sur ${lookups.map((l) => l.name).join(", ")}`, w, "dmarc-absent");
 }
 
 /** Sélecteurs DKIM les plus courants. Le sélecteur réel peut porter n'importe quel nom : ne rien trouver ne prouve rien. */
@@ -200,8 +214,8 @@ export function evalTls(host: string, t: TlsInfo, on: string): Check {
   if (!/^\d{4}-\d{2}-\d{2}/.test(t.validTo)) return mk("tls", L, 1, "erreur", false, "Date de fin de validité illisible", "Le certificat du site n'a pas pu être lu. Aucune conclusion.");
   const left = daysBetweenIso(on, t.validTo);
   const until = fd(t.validTo.slice(0, 10));
-  if (left < 0) return mk("tls", L, 1, "constat", true, `Certificat de ${host} expiré depuis le ${until}`, `Le ${fd(on)}, le certificat HTTPS de ${host} était expiré depuis le ${until} : les navigateurs affichent un avertissement de sécurité aux visiteurs.`);
-  if (left <= TLS_SOON_DAYS) return mk("tls", L, 5, "constat", true, `Certificat de ${host} valable jusqu'au ${until} (${left} jour(s))`, `Le ${fd(on)}, le certificat HTTPS de ${host} arrivait à expiration le ${until}, soit dans ${left} jour(s). S'il n'est pas renouvelé, les navigateurs afficheront un avertissement de sécurité.`);
+  if (left < 0) return mk("tls", L, 1, "constat", true, `Certificat de ${host} expiré depuis le ${until}`, `Le ${fd(on)}, le certificat HTTPS de ${host} était expiré depuis le ${until} : les navigateurs affichent un avertissement de sécurité aux visiteurs.`, "tls-expire", { validTo: t.validTo.slice(0, 10) });
+  if (left <= TLS_SOON_DAYS) return mk("tls", L, 5, "constat", true, `Certificat de ${host} valable jusqu'au ${until} (${left} jour(s))`, `Le ${fd(on)}, le certificat HTTPS de ${host} arrivait à expiration le ${until}, soit dans ${left} jour(s). S'il n'est pas renouvelé, les navigateurs afficheront un avertissement de sécurité.`, "tls-bientot", { validTo: t.validTo.slice(0, 10) });
   if (!t.authorized) return mk("tls", L, 23, "info", false, `Certificat de ${host} non validé : ${clean(t.authError, 80)}`, `Le certificat de ${host} n'a pas été validé automatiquement (${clean(t.authError, 80)}) : à vérifier dans un navigateur.`);
   return mk("tls", L, 23, "conforme", true, `Certificat de ${host} valable jusqu'au ${until}`, `Le certificat HTTPS de ${host} est valide jusqu'au ${until}.`);
 }
@@ -222,7 +236,7 @@ export function evalHeaders(host: string, h: HttpInfo, on: string): Check[] {
   return [
     get("strict-transport-security")
       ? mk("hsts", defs[0].label, 26, "conforme", true, `Strict-Transport-Security: ${get("strict-transport-security")}`, `Le site ${host} impose HTTPS à ses visiteurs (HSTS).`)
-      : mk("hsts", defs[0].label, 6, "constat", true, `Aucun en-tête Strict-Transport-Security sur ${url}`, `Le ${fd(on)}, la page d'accueil ${url} ne renvoyait pas l'en-tête HSTS : rien n'impose au navigateur de revenir en HTTPS lors des visites suivantes.`),
+      : mk("hsts", defs[0].label, 6, "constat", true, `Aucun en-tête Strict-Transport-Security sur ${url}`, `Le ${fd(on)}, la page d'accueil ${url} ne renvoyait pas l'en-tête HSTS : rien n'impose au navigateur de revenir en HTTPS lors des visites suivantes.`, "hsts-absent"),
     csp
       ? mk("csp", defs[1].label, 27, "conforme", true, `Content-Security-Policy: ${csp}`, `Le site ${host} publie une politique de sécurité du contenu (CSP).`)
       : // Vrai et mesuré, mais absent de la plupart des sites, y compris très bien tenus : une information, pas une accroche.
@@ -321,8 +335,7 @@ export async function diagnose(target: { mailDomain: string; webHost: string }, 
   }
   await Promise.all(jobs);
   checks.sort((a, b) => a.rank - b.rank);
-  const certain = checks.filter(mailable);
-  return { mailDomain: d, webHost: h, checkedOn: on, rulesVersion: RULES_VERSION, checks, main: certain[0]?.id ?? "", certainCount: certain.length };
+  return { mailDomain: d, webHost: h, checkedOn: on, rulesVersion: RULES_VERSION, checks, main: hookOf(checks)?.id ?? "", certainCount: checks.filter(mailable).length };
 }
 
 export const STATUS_LABEL: Record<CheckStatus, string> = { constat: "Constat", conforme: "Rien à signaler", info: "Information", non_detecte: "Non détecté", erreur: "Non vérifié" };
@@ -332,10 +345,11 @@ export const DIAGNOSTIC_FRESH_DAYS = 14;
 
 /**
  * Barrière de qualité : un diagnostic n'ouvre l'entrée dans la séquence que s'il est terminé, récent,
- * produit par les règles en vigueur, et s'il contient au moins un constat certain.
+ * produit par les règles en vigueur, et s'il contient au moins un constat certain qui peut servir d'accroche
+ * (un constat secondaire seul, comme HSTS, ne suffit pas).
  */
-export function usableDiagnostic(d: { status: string; certainCount: number; rulesVersion: string; checkedOn: string } | undefined | null, today: string): boolean {
-  if (!d || d.status !== "fait" || d.certainCount < 1 || d.rulesVersion !== RULES_VERSION || !/^\d{4}-\d{2}-\d{2}$/.test(d.checkedOn)) return false;
+export function usableDiagnostic(d: { status: string; mainFinding: string; rulesVersion: string; checkedOn: string } | undefined | null, today: string): boolean {
+  if (!d || d.status !== "fait" || !d.mainFinding || d.rulesVersion !== RULES_VERSION || !/^\d{4}-\d{2}-\d{2}$/.test(d.checkedOn)) return false;
   const age = daysBetweenIso(d.checkedOn, today);
   return age >= 0 && age <= DIAGNOSTIC_FRESH_DAYS;
 }
@@ -345,7 +359,9 @@ export function parseChecks(json: string): Check[] {
   try {
     const v: unknown = JSON.parse(json);
     if (!Array.isArray(v)) return [];
-    return v.filter((c): c is Check => !!c && typeof c === "object" && typeof (c as Check).id === "string" && typeof (c as Check).wording === "string" && typeof (c as Check).proof === "string" && typeof (c as Check).status === "string" && typeof (c as Check).certain === "boolean");
+    return v
+      .filter((c): c is Check => !!c && typeof c === "object" && typeof (c as Check).id === "string" && typeof (c as Check).wording === "string" && typeof (c as Check).proof === "string" && typeof (c as Check).status === "string" && typeof (c as Check).certain === "boolean")
+      .map((c) => ({ ...c, variant: typeof c.variant === "string" ? c.variant : "", rank: typeof c.rank === "number" ? c.rank : 99 }));
   } catch {
     return [];
   }

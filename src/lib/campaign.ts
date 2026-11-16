@@ -103,12 +103,6 @@ export function serviceOf(offer: string): ServiceKey {
   return offer === "diagnostic" ? "diagnostic" : "audit";
 }
 
-/**
- * Le service Diagnostic n'envoie rien tant que son moteur de constats et ses textes ne sont pas livrés :
- * aucune campagne diagnostic ne peut être créée avant.
- */
-export const DIAGNOSTIC_OPEN = false;
-
 export const DEFAULT_DAILY_LIMIT: Record<ServiceKey, number> = { audit: 10, diagnostic: 10 };
 export const MAX_DAILY_LIMIT = 300;
 /** Montée en charge du diagnostic : plafond par palier, un palier tous les RAMP_EVERY jours ouvrés depuis le premier envoi réel. */
@@ -187,14 +181,15 @@ export const REPLIED_REASON = "A répondu";
 /** Ce qu'une entreprise a déjà vécu dans l'autre service. */
 export type CrossHistory = { /** dernier mail reçu au titre de l'autre service */ lastSend: string | null; /** a répondu à une séquence de l'autre service */ replied: boolean; /** a déjà reçu ce service-ci */ sameServiceSent: boolean };
 
-export type EntryExclusion = Exclusion | "a-repondu" | "repos" | "deja-diagnostique" | "origine" | "sans-constat";
+export type EntryExclusion = Exclusion | "a-repondu" | "repos" | "deja-diagnostique" | "origine" | "sans-constat" | "hors-segment";
 export const ENTRY_EXCLUSION_LABEL: Record<EntryExclusion, string> = {
   ...EXCLUSION_LABEL,
   "a-repondu": "a déjà répondu à une autre séquence",
   repos: "délai de repos après la séquence précédente",
   "deja-diagnostique": "a déjà reçu le diagnostic",
   origine: "origine de l'adresse inconnue ou non vérifiée",
-  "sans-constat": "pas de constat certain et récent (diagnostic à faire ou à refaire)",
+  "sans-constat": "pas de constat d'accroche récent (diagnostic à faire ou à refaire)",
+  "hors-segment": "secteur hors du segment choisi",
 };
 
 /** Reconstitue l'historique d'une entreprise vu depuis le service visé, à partir des envois et des séquences arrêtées sur réponse. */

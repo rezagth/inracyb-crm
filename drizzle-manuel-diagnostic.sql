@@ -49,3 +49,9 @@ CREATE TABLE IF NOT EXISTS "company_diagnostics" (
 );
 CREATE INDEX IF NOT EXISTS "company_diagnostics_company_idx" ON "company_diagnostics" ("company_id", "created_at");
 CREATE INDEX IF NOT EXISTS "company_diagnostics_status_idx" ON "company_diagnostics" ("status");
+
+-- ————————————————————————————————————————————————————————————————
+-- Phase D : segment d'une campagne diagnostic, constat cité dans le premier mail.
+-- À appliquer AVANT de déployer le code de la phase D. Sans danger si relancé.
+ALTER TABLE "mail_campaign_items" ADD COLUMN IF NOT EXISTS "hook" text DEFAULT '' NOT NULL;
+ALTER TABLE "mail_campaigns" ADD COLUMN IF NOT EXISTS "segment" text DEFAULT '' NOT NULL;

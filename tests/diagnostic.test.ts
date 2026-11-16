@@ -1,7 +1,7 @@
 /** Moteur de diagnostic : DNS, certificat et HTTP simulés (aucun réseau). */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { clean, diagnose, dmarcNames, evalDkim, evalDmarc, evalHeaders, evalLookalikes, evalSecurityTxt, evalSpf, evalTls, lookalikes, mailable, mergeDns, parseChecks, parseDoh, RULES_VERSION, targetsOf, usableDiagnostic, type Diagnostic, type Dns, type HttpInfo, type Probe, type TlsInfo } from "../src/lib/diagnostic";
+import { clean, diagnose, hookOf, dmarcNames, evalDkim, evalDmarc, evalHeaders, evalLookalikes, evalSecurityTxt, evalSpf, evalTls, lookalikes, mailable, mergeDns, parseChecks, parseDoh, RULES_VERSION, targetsOf, usableDiagnostic, type Diagnostic, type Dns, type HttpInfo, type Probe, type TlsInfo } from "../src/lib/diagnostic";
 import { renderReport } from "../src/lib/diagnostic-report";
 
 const ON = "2026-11-16";
@@ -219,14 +219,37 @@ test("réponses piégées : contenu hostile nettoyé et échappé dans le rappor
 });
 
 test("barrière de qualité : un diagnostic n'ouvre la séquence que s'il a un constat certain, récent, aux règles en vigueur", () => {
-  const ok = { status: "fait", certainCount: 2, rulesVersion: RULES_VERSION, checkedOn: "2026-11-10" };
+  const ok = { status: "fait", mainFinding: "spf", rulesVersion: RULES_VERSION, checkedOn: "2026-11-10" };
   assert.equal(usableDiagnostic(ok, ON), true);
   assert.equal(usableDiagnostic({ ...ok, checkedOn: "2026-11-02" }, ON), true); // 14 jours pile
   assert.equal(usableDiagnostic({ ...ok, checkedOn: "2026-11-01" }, ON), false); // périmé
   assert.equal(usableDiagnostic({ ...ok, checkedOn: "2026-11-17" }, ON), false); // date dans le futur
-  assert.equal(usableDiagnostic({ ...ok, certainCount: 0 }, ON), false);
+  assert.equal(usableDiagnostic({ ...ok, mainFinding: "" }, ON), false); // aucun constat d'accroche (rien, ou HSTS seul)
   assert.equal(usableDiagnostic({ ...ok, status: "a_faire" }, ON), false);
   assert.equal(usableDiagnostic({ ...ok, rulesVersion: "ancienne" }, ON), false);
   assert.equal(usableDiagnostic({ ...ok, checkedOn: "" }, ON), false);
   assert.equal(usableDiagnostic(undefined, ON), false);
+});
+
+test("accroche : HSTS seul n'ouvre pas la campagne ; formes de constat sans phrase validée écartées", async () => {
+  // Domaine bien réglé côté courrier, seul HSTS manque : un constat certain, mais aucune accroche.
+  const d = await diagnose({ mailDomain: "exemple.fr", webHost: "exemple.fr" }, probe({ "MX exemple.fr": MX, "TXT exemple.fr": rec("v=spf1 mx -all"), "TXT _dmarc.exemple.fr": rec("v=DMARC1; p=reject") }), ON);
+  assert.deepEqual([d.certainCount, d.main, hookOf(d.checks)], [1, "", undefined]);
+  assert.equal(byId(d, "hsts").variant, "hsts-absent");
+  assert.equal(usableDiagnostic({ status: "fait", mainFinding: d.main, rulesVersion: d.rulesVersion, checkedOn: d.checkedOn }, ON), false);
+  // Avec un constat de courrier en plus, c'est lui l'accroche, jamais HSTS.
+  const e = await diagnose({ mailDomain: "exemple.fr", webHost: "exemple.fr" }, probe({ "MX exemple.fr": MX, "TXT exemple.fr": rec("v=spf1 mx -all") }), ON);
+  assert.deepEqual([e.main, hookOf(e.checks)?.variant], ["dmarc", "dmarc-absent"]);
+  // Formes exactes couvertes par une phrase validée.
+  assert.equal(evalSpf("exemple.fr", ABSENT, MX, ON).variant, "spf-absent");
+  assert.equal(evalSpf("exemple.fr", rec("v=spf1 -all", "v=spf1 mx -all"), MX, ON).variant, "spf-double");
+  assert.equal(evalSpf("exemple.fr", rec("v=spf1 mx +all"), MX, ON).variant, "spf-plus-all");
+  assert.equal(evalDmarc("exemple.fr", [{ name: "_dmarc.exemple.fr", res: rec("v=DMARC1; p=none") }], MX, ON).variant, "dmarc-none");
+  assert.equal(evalTls("exemple.fr", cert("2026-11-10T08:00:00.000Z", false), ON).variant, "tls-expire");
+  assert.deepEqual(evalTls("exemple.fr", cert("2026-11-25T08:00:00.000Z"), ON).data, { validTo: "2026-11-25" });
+  // Constats vrais mais que les phrases validées décriraient mal : pas d'accroche.
+  const three = evalSpf("exemple.fr", rec("v=spf1 -all", "v=spf1 mx -all", "v=spf1 a -all"), MX, ON); // la phrase dit « deux »
+  const bare = evalSpf("exemple.fr", rec("v=spf1 mx all"), MX, ON); // la phrase dit « se termine par +all »
+  const sp = evalDmarc("mail.exemple.fr", dmarcNames("mail.exemple.fr").map((name, i) => ({ name, res: i === 1 ? rec("v=DMARC1; p=reject; sp=none") : ABSENT })), MX, ON); // la phrase dit « p=none »
+  for (const c of [three, bare, sp]) assert.deepEqual([mailable(c), c.variant, hookOf([c])], [true, "", undefined]);
 });

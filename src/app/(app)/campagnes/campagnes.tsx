@@ -9,19 +9,20 @@ import { useToast } from "@/components/mod/toast";
 import { OFFER_KIT, type OfferKey } from "@/lib/prospection";
 import { SERVICE_KEYS, SERVICE_LABEL, STEP_LABELS, type ServiceKey } from "@/lib/campaign";
 import { fd } from "@/lib/format";
-import { Diagnostics, type DiagProspect, type DiagRow } from "./diagnostics";
+import { Diagnostics, type DiagCandidate, type DiagProspect, type DiagRow } from "./diagnostics";
+import { SEGMENT_LABEL, isSegment } from "@/lib/diagnostic-mails";
 
 type P = { id: string; name: string; sector: string; email: string; why: string | null };
 type Item = { id: string; company: string; step: number; due: string; status: string; reason: string; error: string };
 type Stats = { contacted: number; mails: number; replies: number; bounces: number; spam: number; optouts: number };
 type Health = { missing: boolean; lastRun: { at: string; source: string; ok: boolean; message: string } | null; events: Record<string, number> };
-type C = { id: string; name: string; offer: string; service: ServiceKey; status: string; stats: Stats; items: Item[] };
+type C = { id: string; name: string; offer: string; service: ServiceKey; segment: string; status: string; stats: Stats; items: Item[] };
 type Status = { paused: boolean; reason: string; sent: number; bounces: number; complaints: number };
-type Diag = { open: boolean; limit: number; sent: number; stage: number; stages: number[]; target: number; every: number; firstSendOn: string | null };
+type Diag = { limit: number; sent: number; stage: number; stages: number[]; target: number; every: number; firstSendOn: string | null };
 
 const STATUS: Record<string, string> = { active: "En cours", pause: "En pause", terminee: "Terminée" };
 
-export function Campagnes({ prospects, offers, ready, urlOk, dailyLimit, sentToday, diagnostic, total, restDays, diag, status, pauseRule, fromEmail, health, campaigns: allCampaigns }: { prospects: P[]; offers: OfferKey[]; ready: boolean; urlOk: boolean; dailyLimit: number; sentToday: number; diagnostic: Diag; total: { limit: number; sent: number }; restDays: number; diag: { prospects: DiagProspect[]; rows: DiagRow[]; pending: number; freshDays: number }; status: Record<ServiceKey, Status>; pauseRule: { windowDays: number; minSends: number; maxBounceRate: number }; fromEmail: string; health: Health; campaigns: C[] }) {
+export function Campagnes({ prospects, offers, ready, urlOk, dailyLimit, sentToday, diagnostic, total, restDays, diag, status, pauseRule, fromEmail, health, campaigns: allCampaigns }: { prospects: P[]; offers: OfferKey[]; ready: boolean; urlOk: boolean; dailyLimit: number; sentToday: number; diagnostic: Diag; total: { limit: number; sent: number }; restDays: number; diag: { prospects: DiagProspect[]; rows: DiagRow[]; pending: number; freshDays: number; candidates: DiagCandidate[] }; status: Record<ServiceKey, Status>; pauseRule: { windowDays: number; minSends: number; maxBounceRate: number }; fromEmail: string; health: Health; campaigns: C[] }) {
   const router = useRouter();
   const toast = useToast();
   const [pending, start] = useTransition();
@@ -114,12 +115,11 @@ export function Campagnes({ prospects, offers, ready, urlOk, dailyLimit, sentTod
             <p className="text-muted-fg">
               Palier du jour : {diagnostic.stage + 1} sur {diagnostic.stages.length} ({diagnostic.limit} mails). {diagnostic.firstSendOn ? `Premier envoi le ${fd(diagnostic.firstSendOn)}.` : "Aucun envoi pour l'instant : la montée démarre au premier mail."}
             </p>
-            {!diagnostic.open && <p className="tip">Ce service n&apos;envoie rien pour l&apos;instant : la création de campagne s&apos;ouvrira quand le moteur de constats et les textes des mails seront en place.</p>}
           </div>
         </Card>
       )}
 
-      {tab === "diagnostic" && <Diagnostics prospects={diag.prospects} rows={diag.rows} pending={diag.pending} freshDays={diag.freshDays} />}
+      {tab === "diagnostic" && <Diagnostics prospects={diag.prospects} rows={diag.rows} pending={diag.pending} freshDays={diag.freshDays} candidates={diag.candidates} canSend={ready && urlOk} left={Math.max(0, diagnostic.limit - diagnostic.sent)} limit={diagnostic.limit} />}
 
       {tab === "audit" && <Card title="Nouvelle campagne" actions={<span className="text-xs text-subtle-fg">Envoi depuis {fromEmail} · {sentToday}/{dailyLimit} mails aujourd&apos;hui</span>}>
         <div className="flex flex-col gap-4 p-5">
@@ -193,7 +193,7 @@ export function Campagnes({ prospects, offers, ready, urlOk, dailyLimit, sentTod
                 <details key={c.id} className="p-5">
                   <summary className="flex cursor-pointer flex-wrap items-center gap-3">
                     <strong>{c.name}</strong>
-                    <span className="text-xs text-muted-fg">{OFFER_KIT[c.offer as OfferKey]?.l ?? (c.offer === "diagnostic" ? "Diagnostic gratuit" : c.offer)} · {STATUS[c.status] ?? c.status}</span>
+                    <span className="text-xs text-muted-fg">{OFFER_KIT[c.offer as OfferKey]?.l ?? (c.offer === "diagnostic" ? "Diagnostic gratuit" : c.offer)}{isSegment(c.segment) ? ` · ${SEGMENT_LABEL[c.segment]}` : ""} · {STATUS[c.status] ?? c.status}</span>
                     <span className="text-xs text-muted-fg">{n("en_cours")} en cours · {n("termine")} terminée(s) · {n("arrete")} arrêtée(s){c.items.some((i) => i.error) ? ` · ${c.items.filter((i) => i.error).length} en erreur` : ""}</span>
                     <span className="text-xs text-muted-fg">{c.stats.contacted} contactée(s) · {c.stats.mails} mail(s) · {c.stats.replies} réponse(s) · {c.stats.bounces} rebond(s){c.stats.spam ? ` · ${c.stats.spam} plainte(s) spam` : ""}{c.stats.optouts ? ` · ${c.stats.optouts} désinscrit(s)` : ""}</span>
                   </summary>

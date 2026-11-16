@@ -28,10 +28,13 @@ import {
   type ServiceHealth,
   type ServiceKey,
 } from "@/lib/campaign";
-import { usableDiagnostic } from "@/lib/diagnostic";
+import { siteFromNotes } from "@/lib/contact-extract";
+import { diagnose, parseChecks, targetsOf, type Check, type Probe } from "@/lib/diagnostic";
+import { buildDiagnosticMail, hookVariantOf, isHookVariant, isSegment, type Segment } from "@/lib/diagnostic-mails";
 import { today } from "@/lib/format";
 import { OFFER_KIT, scripts, type OfferKey, type Profile, type Prospect } from "@/lib/prospection";
 import { brevoConfig, sendBrevoMail } from "./brevo";
+import { publicProbe } from "./diagnostic";
 import { logEvent } from "./core";
 import { getProfile } from "./queries";
 
@@ -162,6 +165,52 @@ export type CampaignMail = { subject: string; body: string };
 export type MailFor = (offer: CampaignOffer, prospect: Prospect, profile: Profile, step: number) => CampaignMail | null;
 const defaultMailFor: MailFor = (offer, prospect, profile, step) => (offer === "audit" || offer === "ciso" || offer === "ia" ? (scripts(prospect, offer, profile).mails[step] ?? null) : null);
 
+type DiagnosticPrep = { mail: CampaignMail; hook: string } | { stop: string } | { error: string };
+
+/**
+ * Mail d'une étape de la séquence Diagnostic.
+ * J0 et J+3 citent une mesure : le domaine est remesuré juste avant l'envoi. Constat disparu : la séquence s'arrête
+ * (on n'écrit jamais une affirmation devenue fausse). Mesure impossible aujourd'hui : rien ne part, nouvel essai au passage suivant.
+ * J+7 et J+14 ne citent aucune mesure : ils reprennent le domaine et le constat du premier mail.
+ */
+async function prepareDiagnosticMail(a: { companyId: string; companyName: string; notes: string; email: string; firstName: string; segment: string; step: number; hook: string; profile: Profile; signature: string; today: string; probe: Probe }): Promise<DiagnosticPrep> {
+  if (!isSegment(a.segment)) return { error: "Campagne sans segment : impossible de choisir le texte du mail." };
+  const segment: Segment = a.segment;
+  let checks: Check[] = [];
+  let mailDomain = "";
+  let webHost = "";
+  let hook = a.hook;
+  if (a.step <= 1) {
+    const prev = (await db.select().from(schema.companyDiagnostics).where(and(eq(schema.companyDiagnostics.companyId, a.companyId), eq(schema.companyDiagnostics.status, "fait"))).orderBy(desc(schema.companyDiagnostics.createdAt)).limit(1))[0];
+    const d = await diagnose(targetsOf(a.email, siteFromNotes(a.notes)), a.probe, a.today);
+    await db.insert(schema.companyDiagnostics).values({ companyId: a.companyId, status: "fait", mailDomain: d.mailDomain, webHost: d.webHost, findings: JSON.stringify(d.checks), mainFinding: d.main, certainCount: d.certainCount, rulesVersion: d.rulesVersion, checkedOn: d.checkedOn });
+    checks = d.checks;
+    mailDomain = d.mailDomain;
+    webHost = d.webHost;
+    // Le contrôle qui portait le constat a-t-il pu être mesuré aujourd'hui ?
+    const unmeasured = (id: string) => !id || d.checks.find((c) => c.id === id)?.status === "erreur" || !d.checks.some((c) => c.id === id);
+    if (a.step === 0) {
+      const now = hookVariantOf(d.checks);
+      if (!now) return unmeasured(prev?.mainFinding ?? "") ? { error: "Constat non revérifiable aujourd'hui (mesure impossible) : nouvel essai au prochain envoi." } : { stop: "Plus de constat à la date d'envoi" };
+      hook = now;
+    } else {
+      if (!isHookVariant(hook)) return { error: "Constat du premier mail introuvable : rien n'a été envoyé." };
+      if (!d.checks.some((c) => c.variant === hook && c.status === "constat" && c.certain)) {
+        const id = hook.split("-")[0];
+        return unmeasured(id) ? { error: "Constat non revérifiable aujourd'hui (mesure impossible) : nouvel essai au prochain envoi." } : { stop: "Constat corrigé ou modifié depuis le premier mail" };
+      }
+    }
+  } else {
+    const last = (await db.select().from(schema.companyDiagnostics).where(and(eq(schema.companyDiagnostics.companyId, a.companyId), eq(schema.companyDiagnostics.status, "fait"))).orderBy(desc(schema.companyDiagnostics.createdAt)).limit(1))[0];
+    mailDomain = last?.mailDomain ?? "";
+    webHost = last?.webHost ?? "";
+    checks = parseChecks(last?.findings ?? "[]").filter((c) => c.variant === hook);
+  }
+  if (!isHookVariant(hook)) return { error: "Constat du premier mail introuvable : rien n'a été envoyé." };
+  const m = buildDiagnosticMail({ segment, step: a.step, hook, checks, mailDomain, webHost, prenom: a.firstName, entreprise: a.companyName, me: a.profile.me, signature: a.signature });
+  return m.ok ? { mail: { subject: m.subject, body: m.body }, hook } : { error: m.error };
+}
+
 export type RunSummary = { ok: boolean; sent: number; stopped: number; errors: number; waiting: number; message: string };
 
 export { runFailed };
@@ -179,7 +228,7 @@ export async function recordRun(source: "cron" | "manuel", r: RunSummary): Promi
  * Envoie les mails de campagne arrivés à échéance, dans la limite du plafond du jour de chaque service (audit, diagnostic) et du total.
  * Avant chaque envoi : on revérifie l'entreprise (perdue ? avancée dans le pipeline ? désinscrite ? e-mail valide ?) et on ne renvoie jamais une étape déjà envoyée.
  */
-export async function runCampaigns(opts: { campaignId?: string; budgetMs?: number; mailFor?: MailFor } = {}): Promise<RunSummary> {
+export async function runCampaigns(opts: { campaignId?: string; budgetMs?: number; mailFor?: MailFor; probe?: Probe } = {}): Promise<RunSummary> {
   const cfg = brevoConfig();
   const fail = (message: string): RunSummary => ({ ok: false, sent: 0, stopped: 0, errors: 0, waiting: 0, message });
   if (!cfg.apiKey) return fail("Brevo n'est pas configuré : ajoute BREVO_API_KEY (dans .env et dans Vercel).");
@@ -250,18 +299,10 @@ export async function runCampaigns(opts: { campaignId?: string; budgetMs?: numbe
       errors++;
       continue;
     }
-    // Diagnostic : jamais de mail sans constat certain et récent (un constat périmé peut être devenu faux).
-    if (service === "diagnostic") {
-      const d = (await db.select().from(schema.companyDiagnostics).where(and(eq(schema.companyDiagnostics.companyId, c.id), eq(schema.companyDiagnostics.status, "fait"))).orderBy(desc(schema.companyDiagnostics.createdAt)).limit(1))[0];
-      if (!usableDiagnostic(d, t)) {
-        await db.update(schema.mailCampaignItems).set({ lastError: "Pas de constat certain et récent : relance le diagnostic de cette entreprise." }).where(eq(schema.mailCampaignItems.id, item.id));
-        errors++;
-        continue;
-      }
-    }
     const offer = campaign.offer as CampaignOffer;
     const step = item.nextStep;
     const already = (await db.select({ id: schema.mailSends.id }).from(schema.mailSends).where(and(eq(schema.mailSends.companyId, c.id), eq(schema.mailSends.offer, offer), eq(schema.mailSends.step, step))).limit(1))[0];
+    let hook = "";
     const finishStep = async (sentOn: string, subject: string, viaBrevo: boolean) => {
       const nd = nextDueAfterSend(sentOn, step);
       await db.transaction(async (tx) => {
@@ -273,13 +314,25 @@ export async function runCampaigns(opts: { campaignId?: string; budgetMs?: numbe
         }
         await tx
           .update(schema.mailCampaignItems)
-          .set(nd ? { nextStep: step + 1, nextDue: nd, lastError: "" } : { status: "termine", stopReason: "Séquence terminée", lastError: "" })
+          .set({ ...(nd ? { nextStep: step + 1, nextDue: nd, lastError: "" } : { status: "termine", stopReason: "Séquence terminée", lastError: "" }), ...(hook && step === 0 ? { hook } : {}) })
           .where(eq(schema.mailCampaignItems.id, item.id));
       });
     };
     if (already) { await finishStep(t, "", false); continue; }
 
-    const mail = mailFor(offer, { name: c.name, sector: c.sector, contact: [ct?.firstName, ct?.lastName].filter(Boolean).join(" "), role: ct?.role ?? "", email, phone: ct?.phone ?? "" }, profile, step);
+    const prospect: Prospect = { name: c.name, sector: c.sector, contact: [ct?.firstName, ct?.lastName].filter(Boolean).join(" "), role: ct?.role ?? "", email, phone: ct?.phone ?? "" };
+    let mail: CampaignMail | null;
+    if (service === "diagnostic") {
+      const prep = await prepareDiagnosticMail({ companyId: c.id, companyName: c.name, notes: c.notes, email, firstName: ct?.firstName ?? "", segment: campaign.segment, step, hook: item.hook, profile, signature: scripts(prospect, "audit", profile).x.sig, today: t, probe: opts.probe ?? publicProbe });
+      if ("stop" in prep) { await stop(item.id, prep.stop); continue; }
+      if ("error" in prep) {
+        await db.update(schema.mailCampaignItems).set({ lastError: prep.error.slice(0, 300) }).where(eq(schema.mailCampaignItems.id, item.id));
+        errors++;
+        continue;
+      }
+      mail = prep.mail;
+      hook = prep.hook;
+    } else mail = mailFor(offer, prospect, profile, step);
     if (!mail) {
       await db.update(schema.mailCampaignItems).set({ lastError: `Aucun modèle de mail pour « ${offerLabel(offer)} » : rien n'a été envoyé.` }).where(eq(schema.mailCampaignItems.id, item.id));
       errors++;

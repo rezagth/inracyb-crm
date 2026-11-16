@@ -22,6 +22,9 @@ export const SECTOR_SEARCH: Partial<Record<Sector, { naf: string[]; q?: string; 
   Notariat: { naf: ["69.10Z"], q: "notaire", hint: "Études et offices notariaux" },
   "Expertise comptable": { naf: ["69.20Z"], hint: "Cabinets d'expertise comptable" },
   Immobilier: { naf: ["68.31Z", "68.32A"], hint: "Agences immobilières et syndics" },
+  // Codes vérifiés dans la NAF rév. 2 de l'Insee (16/11/2026). La NAF 2025 devient la référence des codes APE au 1er janvier 2027 : à revoir à cette date.
+  Numérique: { naf: ["62.01Z", "62.02A", "58.29C"], hint: "Éditeurs de logiciels, ESN, programmation et conseil informatique" },
+  Courtage: { naf: ["66.22Z"], hint: "Agents et courtiers d'assurances" },
   Santé: { naf: ["86.21Z", "86.22C", "86.23Z", "86.90B", "86.90E"], hint: "Médecins, dentistes, laboratoires, rééducation" },
 };
 export const SEARCHABLE_SECTORS = Object.keys(SECTOR_SEARCH) as Sector[];
@@ -103,6 +106,8 @@ export function sectorFromNaf(naf: string, name = ""): Sector {
   if (naf === "69.20Z") return "Expertise comptable";
   if (naf.startsWith("68.3")) return "Immobilier";
   if (naf.startsWith("86.")) return "Santé";
+  if (naf === "62.01Z" || naf === "62.02A" || naf === "58.29C") return "Numérique";
+  if (naf === "66.22Z") return "Courtage";
   return "Autres";
 }
 

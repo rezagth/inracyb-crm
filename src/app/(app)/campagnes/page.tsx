@@ -4,11 +4,12 @@ import { prospectList } from "@/server/queries";
 import { getSettings } from "@/server/core";
 import { brevoConfig, brevoReady } from "@/server/brevo";
 import { appUrl, checkServicePauses, crossHistories, getDailyState, optoutSet, restDays } from "@/server/campaigns";
-import { PAUSE_RULE, DIAGNOSTIC_OPEN, entryExclusion, ENTRY_EXCLUSION_LABEL, RAMP_EVERY, serviceOf } from "@/lib/campaign";
+import { PAUSE_RULE, entryExclusion, ENTRY_EXCLUSION_LABEL, RAMP_EVERY, serviceOf } from "@/lib/campaign";
 import { BOUNCE_REASONS, REASON } from "@/lib/brevo-events";
 import { today } from "@/lib/format";
 import { siteFromNotes } from "@/lib/contact-extract";
-import { DIAGNOSTIC_FRESH_DAYS, parseChecks, targetsOf, usableDiagnostic } from "@/lib/diagnostic";
+import { DIAGNOSTIC_FRESH_DAYS, hookOf, parseChecks, targetsOf, usableDiagnostic } from "@/lib/diagnostic";
+import { HOOK_LABEL, isHookVariant, segmentOfSector } from "@/lib/diagnostic-mails";
 import { latestDiagnostics } from "@/server/diagnostic";
 import { PageHeader } from "@/components/ui";
 import { Campagnes } from "./campagnes";
@@ -44,7 +45,18 @@ export default async function CampagnesPage() {
     return target ? [{ id: p.id, name: p.name, sector: p.sector, target }] : [];
   });
   const names = new Map(all.map((p) => [p.id, p.name]));
-  const diagRows = [...(await latestDiagnostics()).values()].map((d) => {
+  const latest = await latestDiagnostics();
+  // Entreprises qui peuvent entrer dans une campagne Diagnostic : secteur d'un segment, constat d'accroche récent, règles d'entrée du service.
+  const diagHistory = await crossHistories("diagnostic");
+  const diagCandidates = all.flatMap((p) => {
+    const d = latest.get(p.id);
+    const segment = segmentOfSector(p.sector);
+    if (!d || !segment || !usableDiagnostic(d, t)) return [];
+    const variant = hookOf(parseChecks(d.findings))?.variant ?? "";
+    const ex = entryExclusion({ id: p.id, name: p.name, stage: p.stage, email: p.email, emailSource: p.emailSource }, optouts, inCampaign, "diagnostic", diagHistory.get(p.id), t, rest);
+    return [{ id: p.id, name: p.name, sector: p.sector, segment, email: p.email, hook: isHookVariant(variant) ? HOOK_LABEL[variant] : "", contact: p.contact, why: ex ? ENTRY_EXCLUSION_LABEL[ex] : null }];
+  });
+  const diagRows = [...latest.values()].map((d) => {
     const main = parseChecks(d.findings).find((c) => c.id === d.mainFinding);
     return { id: d.id, company: names.get(d.companyId) ?? "", target: [...new Set([d.mailDomain, d.webHost].filter(Boolean))].join(" · "), checkedOn: d.checkedOn, main: main?.label ?? "", mainWording: main?.wording ?? "", certainCount: d.certainCount, usable: usableDiagnostic(d, t) };
   });
@@ -81,10 +93,10 @@ export default async function CampagnesPage() {
         urlOk={!!appUrl()}
         dailyLimit={state.audit.limit}
         sentToday={state.audit.sent}
-        diagnostic={{ open: DIAGNOSTIC_OPEN, limit: state.diagnostic.limit, sent: state.diagnostic.sent, stage: state.diagnostic.ramp.stage, stages: state.diagnostic.ramp.stages, target: state.diagnostic.ramp.target, every: RAMP_EVERY, firstSendOn: state.diagnostic.firstSendOn }}
+        diagnostic={{ limit: state.diagnostic.limit, sent: state.diagnostic.sent, stage: state.diagnostic.ramp.stage, stages: state.diagnostic.ramp.stages, target: state.diagnostic.ramp.target, every: RAMP_EVERY, firstSendOn: state.diagnostic.firstSendOn }}
         total={{ limit: state.total.limit, sent: state.total.sent }}
         restDays={rest}
-        diag={{ prospects: diagProspects, rows: diagRows, pending: diagPending, freshDays: DIAGNOSTIC_FRESH_DAYS }}
+        diag={{ prospects: diagProspects, rows: diagRows, pending: diagPending, freshDays: DIAGNOSTIC_FRESH_DAYS, candidates: diagCandidates }}
         status={{ audit: statusOf("audit"), diagnostic: statusOf("diagnostic") }}
         pauseRule={{ windowDays: PAUSE_RULE.windowDays, minSends: PAUSE_RULE.minSends, maxBounceRate: PAUSE_RULE.maxBounceRate }}
         fromEmail={brevoConfig().fromEmail}
@@ -94,6 +106,7 @@ export default async function CampagnesPage() {
           name: c.name,
           offer: c.offer,
           service: serviceOf(c.offer),
+          segment: c.segment,
           status: c.status,
           stats: statsOf(c.id, c.offer),
           items: items.filter((i) => i.item.campaignId === c.id).map((i) => ({ id: i.item.id, company: i.company, step: i.item.nextStep, due: i.item.nextDue, status: i.item.status, reason: i.item.stopReason, error: i.item.lastError })),

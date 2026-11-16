@@ -19,7 +19,7 @@ export function statusOfStage(stage: string): { label: string; tone: Tone } {
   return { label: "En discussion", tone: "info" };
 }
 
-export const SECTORS = ["Juridique", "Notariat", "Santé", "Expertise comptable", "Immobilier", "Autres"] as const;
+export const SECTORS = ["Juridique", "Notariat", "Santé", "Expertise comptable", "Immobilier", "Numérique", "Courtage", "Autres"] as const;
 export const SOURCES = ["Site web", "LinkedIn", "Recommandation", "Salon", "Partenaire", "Recherche automatique", "Autre"] as const;
 export const OFFERS = [
   { id: "Audit", label: "Audit forfaitaire" },

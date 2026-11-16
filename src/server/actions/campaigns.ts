@@ -5,8 +5,9 @@ import { and, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { db, schema } from "@/db";
 import { requireUser } from "@/lib/auth";
-import { CAMPAIGN_OFFERS, DIAGNOSTIC_OPEN, REPLIED_REASON, entryExclusion, ENTRY_EXCLUSION_LABEL, serviceOf, type EntryExclusion } from "@/lib/campaign";
+import { CAMPAIGN_OFFERS, REPLIED_REASON, entryExclusion, ENTRY_EXCLUSION_LABEL, serviceOf, type EntryExclusion } from "@/lib/campaign";
 import { usableDiagnostic } from "@/lib/diagnostic";
+import { isSegment, segmentOfSector } from "@/lib/diagnostic-mails";
 import { today } from "@/lib/format";
 import { prospectList } from "../queries";
 import { logEvent } from "../core";
@@ -18,14 +19,14 @@ const offerZ = z.enum(CAMPAIGN_OFFERS as [string, ...string[]]);
 const MAX_PER_CAMPAIGN = 500;
 
 /** Crée la campagne avec les entreprises cochées (re-filtrées côté serveur : jamais de Perdu, désinscrit, sans e-mail ou déjà en campagne), puis envoie le premier lot du jour. */
-export async function createCampaignAction(name: string, offer: string, companyIds: string[]): Promise<R> {
+export async function createCampaignAction(name: string, offer: string, companyIds: string[], segment = ""): Promise<R> {
   await requireUser();
   const n = z.string().trim().min(1).max(120).safeParse(name ?? "");
   const o = offerZ.safeParse(offer);
   const ids = z.array(z.string().min(1).max(64)).min(1).max(MAX_PER_CAMPAIGN).safeParse(companyIds);
   if (!n.success) return { ok: false, error: "Donne un nom à la campagne." };
   if (!o.success) return { ok: false, error: "Offre invalide." };
-  if (o.data === "diagnostic" && !DIAGNOSTIC_OPEN) return { ok: false, error: "Le service Diagnostic n'est pas encore ouvert : il attend le moteur de constats et les textes des mails." };
+  if (o.data === "diagnostic" && !isSegment(segment)) return { ok: false, error: "Choisis le segment de la campagne Diagnostic : il détermine le texte des mails." };
   if (!ids.success) return { ok: false, error: `Sélectionne entre 1 et ${MAX_PER_CAMPAIGN} entreprises.` };
 
   const wanted = new Set(ids.data);
@@ -45,8 +46,8 @@ export async function createCampaignAction(name: string, offer: string, companyI
   const eligible: string[] = [];
   const excluded: Partial<Record<EntryExclusion, number>> = {};
   for (const p of (await prospectList()).filter((p) => wanted.has(p.id))) {
-    // Barrière de qualité du diagnostic : au moins un constat certain, mesuré récemment.
-    const ex = entryExclusion({ id: p.id, name: p.name, stage: p.stage, email: p.email, emailSource: p.emailSource }, optouts, inCampaign, target, history.get(p.id), t, rest) ?? (target === "diagnostic" && !usableDiagnostic(diagnostics.get(p.id), t) ? "sans-constat" : null);
+    // Diagnostic : le secteur doit correspondre au segment (le texte en dépend), et il faut un constat d'accroche mesuré récemment.
+    const ex = entryExclusion({ id: p.id, name: p.name, stage: p.stage, email: p.email, emailSource: p.emailSource }, optouts, inCampaign, target, history.get(p.id), t, rest) ?? (target !== "diagnostic" ? null : segmentOfSector(p.sector) !== segment ? "hors-segment" : !usableDiagnostic(diagnostics.get(p.id), t) ? "sans-constat" : null);
     if (ex) excluded[ex] = (excluded[ex] ?? 0) + 1;
     else eligible.push(p.id);
   }
@@ -56,7 +57,7 @@ export async function createCampaignAction(name: string, offer: string, companyI
   let camp: { id: string };
   try {
     camp = await db.transaction(async (tx) => {
-      const c = (await tx.insert(schema.mailCampaigns).values({ name: n.data, offer: o.data }).returning({ id: schema.mailCampaigns.id }))[0];
+      const c = (await tx.insert(schema.mailCampaigns).values({ name: n.data, offer: o.data, segment: o.data === "diagnostic" ? segment : "" }).returning({ id: schema.mailCampaigns.id }))[0];
       await tx.insert(schema.mailCampaignItems).values(eligible.map((companyId) => ({ campaignId: c.id, companyId, nextStep: 0, nextDue: t })));
       return c;
     });
