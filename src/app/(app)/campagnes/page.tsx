@@ -3,8 +3,8 @@ import { db, schema } from "@/db";
 import { prospectList } from "@/server/queries";
 import { getSettings } from "@/server/core";
 import { brevoConfig, brevoReady } from "@/server/brevo";
-import { appUrl, crossHistories, getDailyState, optoutSet, restDays } from "@/server/campaigns";
-import { DIAGNOSTIC_OPEN, entryExclusion, ENTRY_EXCLUSION_LABEL, RAMP_EVERY, serviceOf } from "@/lib/campaign";
+import { appUrl, checkServicePauses, crossHistories, getDailyState, optoutSet, restDays } from "@/server/campaigns";
+import { PAUSE_RULE, DIAGNOSTIC_OPEN, entryExclusion, ENTRY_EXCLUSION_LABEL, RAMP_EVERY, serviceOf } from "@/lib/campaign";
 import { BOUNCE_REASONS, REASON } from "@/lib/brevo-events";
 import { today } from "@/lib/format";
 import { PageHeader } from "@/components/ui";
@@ -27,10 +27,12 @@ export default async function CampagnesPage() {
   const history = await crossHistories("audit");
   const rest = restDays();
   const prospects = (await prospectList()).map((p) => {
-    const ex = entryExclusion({ id: p.id, name: p.name, stage: p.stage, email: p.email }, optouts, inCampaign, "audit", history.get(p.id), t, rest);
+    const ex = entryExclusion({ id: p.id, name: p.name, stage: p.stage, email: p.email, emailSource: p.emailSource }, optouts, inCampaign, "audit", history.get(p.id), t, rest);
     return { id: p.id, name: p.name, sector: p.sector, email: p.email, why: ex ? ENTRY_EXCLUSION_LABEL[ex] : null };
   });
   const state = await getDailyState(t);
+  const status = await checkServicePauses();
+  const statusOf = (k: "audit" | "diagnostic") => ({ paused: status[k].paused, reason: status[k].reason, ...status[k].health });
   const sends = await db.select({ companyId: schema.mailSends.companyId, offer: schema.mailSends.offer }).from(schema.mailSends);
   const statsOf = (campaignId: string, offer: string) => {
     const its = items.filter((i) => i.item.campaignId === campaignId);
@@ -64,6 +66,8 @@ export default async function CampagnesPage() {
         diagnostic={{ open: DIAGNOSTIC_OPEN, limit: state.diagnostic.limit, sent: state.diagnostic.sent, stage: state.diagnostic.ramp.stage, stages: state.diagnostic.ramp.stages, target: state.diagnostic.ramp.target, every: RAMP_EVERY, firstSendOn: state.diagnostic.firstSendOn }}
         total={{ limit: state.total.limit, sent: state.total.sent }}
         restDays={rest}
+        status={{ audit: statusOf("audit"), diagnostic: statusOf("diagnostic") }}
+        pauseRule={{ windowDays: PAUSE_RULE.windowDays, minSends: PAUSE_RULE.minSends, maxBounceRate: PAUSE_RULE.maxBounceRate }}
         fromEmail={brevoConfig().fromEmail}
         health={health}
         campaigns={campaigns.map((c) => ({

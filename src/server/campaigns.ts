@@ -1,5 +1,5 @@
 import "server-only";
-import { and, asc, desc, eq, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, sql } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { stageOf, stageRank } from "@/lib/constants";
 import { EMAIL_RE } from "@/lib/brevo";
@@ -9,11 +9,15 @@ import {
   DEFAULT_DAILY_LIMIT,
   makeOptoutToken,
   nextDueAfterSend,
+  originBlock,
+  PAUSE_RULE,
+  pauseReason,
   parseLimit,
   pickDueByService,
   REPLIED_REASON,
   REST_DAYS_DEFAULT,
   runFailed,
+  SERVICE_KEYS,
   SERVICE_LABEL,
   serviceOf,
   STEP_LABELS,
@@ -21,6 +25,7 @@ import {
   type CampaignOffer,
   type CrossHistory,
   type DailyState,
+  type ServiceHealth,
   type ServiceKey,
 } from "@/lib/campaign";
 import { today } from "@/lib/format";
@@ -98,6 +103,57 @@ export async function crossHistories(target: ServiceKey): Promise<Map<string, Cr
   return out;
 }
 
+const BOUNCE_KINDS = ["rebond", "bloque", "invalide"];
+export type ServiceStatus = { paused: boolean; reason: string; changedAt: Date | null; health: ServiceHealth };
+
+/**
+ * Santé de chaque service sur la fenêtre de la règle de pause (30 jours, ou depuis la dernière reprise) :
+ * envois, rebonds et plaintes. Met le service en pause, avec une tâche prioritaire, dès que la règle est franchie.
+ * Une pause ne se lève jamais toute seule : c'est toi qui reprends, depuis la page Campagnes.
+ */
+export async function checkServicePauses(): Promise<Record<ServiceKey, ServiceStatus>> {
+  const states = await db.select().from(schema.mailServiceState);
+  const windowStart = new Date(Date.now() - PAUSE_RULE.windowDays * 86_400_000);
+  const out = {} as Record<ServiceKey, ServiceStatus>;
+  for (const service of SERVICE_KEYS) {
+    const st = states.find((s) => s.service === service);
+    // Après une reprise, on ne recompte que ce qui est arrivé depuis.
+    const since = st && !st.paused && st.changedAt > windowStart ? st.changedAt : windowStart;
+    const sends = await db.select({ offer: schema.mailSends.offer, n: sql<number>`count(*)` }).from(schema.mailSends).where(gte(schema.mailSends.createdAt, since)).groupBy(schema.mailSends.offer);
+    const events = await db.select({ type: schema.mailEvents.type, n: sql<number>`count(*)` }).from(schema.mailEvents).where(and(eq(schema.mailEvents.service, service), gte(schema.mailEvents.createdAt, since))).groupBy(schema.mailEvents.type);
+    const count = (kinds: string[]) => events.filter((e) => kinds.includes(e.type)).reduce((a, e) => a + Number(e.n), 0);
+    const health: ServiceHealth = { sent: sends.filter((s) => serviceOf(s.offer) === service).reduce((a, s) => a + Number(s.n), 0), bounces: count(BOUNCE_KINDS), complaints: count(["spam"]) };
+    if (st?.paused) { out[service] = { paused: true, reason: st.reason, changedAt: st.changedAt, health }; continue; }
+    const reason = pauseReason(health);
+    if (!reason) { out[service] = { paused: false, reason: "", changedAt: st?.changedAt ?? null, health }; continue; }
+    const now = new Date();
+    await db.transaction(async (tx) => {
+      await tx.insert(schema.mailServiceState).values({ service, paused: true, reason, changedAt: now }).onConflictDoUpdate({ target: schema.mailServiceState.service, set: { paused: true, reason, changedAt: now } });
+      await tx.insert(schema.tasks).values({ title: `Service ${SERVICE_LABEL[service]} en pause : ${reason}`.slice(0, 200), dueDate: today(), priority: "haute" });
+      await logEvent(tx, null, "mail", `Envois du service ${SERVICE_LABEL[service]} mis en pause automatiquement : ${reason}.`);
+    });
+    out[service] = { paused: true, reason, changedAt: now, health };
+  }
+  return out;
+}
+
+/** Reprise manuelle d'un service : le calcul de santé repart de cet instant. */
+export async function resumeService(service: ServiceKey): Promise<void> {
+  const now = new Date();
+  await db.insert(schema.mailServiceState).values({ service, paused: false, reason: "", changedAt: now }).onConflictDoUpdate({ target: schema.mailServiceState.service, set: { paused: false, reason: "", changedAt: now } });
+  await logEvent(db, null, "mail", `Envois du service ${SERVICE_LABEL[service]} repris manuellement.`);
+}
+
+/**
+ * Service auquel rattacher un événement Brevo sans tag exploitable : celui du dernier mail envoyé à cette adresse.
+ */
+export async function serviceOfLastSend(email: string): Promise<ServiceKey | null> {
+  const cts = await db.select({ companyId: schema.contacts.companyId }).from(schema.contacts).where(sql`lower(${schema.contacts.email}) = ${email}`);
+  if (!cts.length) return null;
+  const last = (await db.select({ offer: schema.mailSends.offer }).from(schema.mailSends).where(inArray(schema.mailSends.companyId, cts.map((c) => c.companyId))).orderBy(desc(schema.mailSends.createdAt)).limit(1))[0];
+  return last ? serviceOf(last.offer) : null;
+}
+
 export const offerLabel = (offer: string): string => OFFER_KIT[offer as OfferKey]?.l ?? (offer === "diagnostic" ? "Diagnostic gratuit" : offer);
 
 export type CampaignMail = { subject: string; body: string };
@@ -136,12 +192,18 @@ export async function runCampaigns(opts: { campaignId?: string; budgetMs?: numbe
   let remainingTotal = state.total.remaining;
   const mailFor = opts.mailFor ?? defaultMailFor;
 
-  const rows = await db
+  // Un service en pause (rebonds, plainte) n'envoie plus rien tant que tu ne l'as pas repris.
+  const status = await checkServicePauses();
+  const pausedNote = SERVICE_KEYS.filter((s) => status[s].paused).map((s) => `Service ${SERVICE_LABEL[s]} en pause (${status[s].reason})`).join(" · ");
+
+  const allRows = await db
     .select({ item: schema.mailCampaignItems, campaign: schema.mailCampaigns })
     .from(schema.mailCampaignItems)
     .innerJoin(schema.mailCampaigns, eq(schema.mailCampaigns.id, schema.mailCampaignItems.campaignId))
     .where(and(eq(schema.mailCampaignItems.status, "en_cours"), eq(schema.mailCampaigns.status, "active"), ...(opts.campaignId ? [eq(schema.mailCampaigns.id, opts.campaignId)] : [])))
     .orderBy(asc(schema.mailCampaignItems.nextDue));
+  const rows = allRows.filter((r) => !status[serviceOf(r.campaign.offer)].paused);
+  const held = allRows.filter((r) => r.item.nextDue <= t).length - rows.filter((r) => r.item.nextDue <= t).length;
 
   const dueRows = rows.filter((r) => r.item.nextDue <= t);
   const dueAll = dueRows.length;
@@ -150,7 +212,7 @@ export async function runCampaigns(opts: { campaignId?: string; budgetMs?: numbe
   if (remainingTotal <= 0 || (dueServices.length ? dueServices.every((s) => remaining[s] <= 0) : remaining.audit <= 0)) {
     const onlyAudit = dueServices.every((s) => s === "audit");
     const caps = onlyAudit ? `${state.audit.limit} mails` : (["audit", "diagnostic"] as const).map((s) => `${SERVICE_LABEL[s]} ${state[s].sent}/${state[s].limit}`).join(", ");
-    return { ok: true, sent: 0, stopped: 0, errors: 0, waiting: dueAll, message: `Plafond du jour atteint (${caps}). ${dueAll} mail(s) en attente : ils partiront demain${onlyAudit ? ", ou monte MAIL_DAILY_LIMIT" : ""}.` };
+    return { ok: true, sent: 0, stopped: 0, errors: 0, waiting: dueAll, message: `Plafond du jour atteint (${caps}). ${dueAll} mail(s) en attente : ils partiront demain${onlyAudit ? ", ou monte MAIL_DAILY_LIMIT" : ""}.${pausedNote ? ` ${pausedNote}.` : ""}` };
   }
 
   const due = pickDueByService(rows.map((r) => ({ ...r, nextDue: r.item.nextDue, service: serviceOf(r.campaign.offer) })), t, state);
@@ -176,6 +238,12 @@ export async function runCampaigns(opts: { campaignId?: string; budgetMs?: numbe
     if (optouts.has(email)) { await stop(item.id, "Désinscrit"); continue; }
     if (!EMAIL_RE.test(email)) {
       await db.update(schema.mailCampaignItems).set({ lastError: "E-mail manquant ou invalide : complète la fiche." }).where(eq(schema.mailCampaignItems.id, item.id));
+      errors++;
+      continue;
+    }
+    const blocked = originBlock(ct?.emailSource ?? "", service);
+    if (blocked) {
+      await db.update(schema.mailCampaignItems).set({ lastError: blocked }).where(eq(schema.mailCampaignItems.id, item.id));
       errors++;
       continue;
     }
@@ -232,6 +300,6 @@ export async function runCampaigns(opts: { campaignId?: string; budgetMs?: numbe
   }
 
   const waiting = Math.max(0, dueAll - sent - stopped);
-  const parts = [`${sent} mail(s) envoyé(s)`, stopped ? `${stopped} arrêté(s)` : "", errors ? `${errors} en erreur` : "", waiting ? `${waiting} en attente (plafond ou délai)` : "", firstError ? `Erreur : ${firstError}` : ""].filter(Boolean);
+  const parts = [`${sent} mail(s) envoyé(s)`, stopped ? `${stopped} arrêté(s)` : "", errors ? `${errors} en erreur` : "", waiting ? `${waiting} en attente (plafond ou délai)` : "", firstError ? `Erreur : ${firstError}` : "", pausedNote ? `${pausedNote}${held ? ` : ${held} mail(s) retenu(s)` : ""}` : ""].filter(Boolean);
   return { ok: true, sent, stopped, errors, waiting, message: parts.join(" · ") };
 }

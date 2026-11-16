@@ -47,7 +47,7 @@ export async function createCompanyAction(_: ActionResult | undefined, form: For
             .insert(schema.companies)
             .values({ name: v.name, sector: v.sector, source: v.source, offer: v.offer, priority: v.priority, stage: v.stage, city: v.city, address: v.address, siren: v.siren.replace(/\s/g, ""), amountCents: parseEuroToCents(v.amount), notes: v.notes, lastContact: today() })
             .returning({ id: schema.companies.id }))[0];
-      if (contact.data.firstName || contact.data.lastName) await tx.insert(schema.contacts).values({ ...contact.data, firstName: contact.data.firstName || contact.data.lastName, companyId: c.id, isPrimary: true });
+      if (contact.data.firstName || contact.data.lastName) await tx.insert(schema.contacts).values({ ...contact.data, emailSource: contact.data.email ? "saisie" : "", firstName: contact.data.firstName || contact.data.lastName, companyId: c.id, isPrimary: true });
       await logEvent(tx, c.id, "create", `Entreprise créée — source : ${v.source}`);
       if (j0 && (v.stage === "qualif" || v.stage === "contacte")) {
         await tx.insert(schema.tasks).values({ title: `Envoyer le mail J0 à ${v.name}`, companyId: c.id, dueDate: today(), priority: "moyenne" });
@@ -97,7 +97,7 @@ export async function addContactAction(companyId: string, _: ActionResult | unde
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Contact invalide." };
   if (!parsed.data.firstName && !parsed.data.lastName) return { ok: false, error: "Indique au moins un prénom ou un nom." };
   const hasPrimary = (await db.select().from(schema.contacts).where(and(eq(schema.contacts.companyId, companyId), eq(schema.contacts.isPrimary, true))).limit(1))[0];
-  await db.insert(schema.contacts).values({ ...parsed.data, firstName: parsed.data.firstName || parsed.data.lastName, companyId, isPrimary: !hasPrimary });
+  await db.insert(schema.contacts).values({ ...parsed.data, emailSource: parsed.data.email ? "saisie" : "", firstName: parsed.data.firstName || parsed.data.lastName, companyId, isPrimary: !hasPrimary });
   revalidatePath(`/entreprises/${companyId}`);
   return { ok: true, message: "Contact ajouté" };
 }

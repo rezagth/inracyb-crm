@@ -11,7 +11,8 @@ import { OFFER_KIT, nextBiz, type OfferKey } from "@/lib/prospection";
 import { EMAIL_RE } from "@/lib/brevo";
 import { brevoConfig, sendBrevoMail } from "../brevo";
 import { logEvent, type DbOrTx } from "../core";
-import { getDailyState, optoutSet } from "../campaigns";
+import { originBlock } from "@/lib/campaign";
+import { checkServicePauses, getDailyState, optoutSet } from "../campaigns";
 
 type R = { ok: true; message: string; nextStep?: number } | { ok: false; error: string };
 const offerZ = z.enum(["audit", "ciso", "ia"]);
@@ -123,6 +124,10 @@ export async function sendSequenceMailAction(companyId: string, offer: string, s
   // Garde-fous : jamais deux fois la même étape, et un plafond par jour pour protéger la réputation du domaine.
   const already = (await db.select({ id: schema.mailSends.id }).from(schema.mailSends).where(and(eq(schema.mailSends.companyId, companyId), eq(schema.mailSends.offer, of.data), eq(schema.mailSends.step, st.data))).limit(1))[0];
   if (already) return { ok: false, error: `Le mail ${STEPS[st.data].k} a déjà été envoyé à ${c.name}. Rien n'a été renvoyé.` };
+  const blocked = originBlock(ct?.emailSource ?? "", "audit");
+  if (blocked) return { ok: false, error: blocked };
+  const audit = (await checkServicePauses()).audit;
+  if (audit.paused) return { ok: false, error: `Envois en pause (${audit.reason}). Reprends le service depuis la page Campagnes une fois la cause corrigée.` };
   // Les envois à la main comptent dans le service « audit » (comme avant) et dans le total du jour.
   const state = await getDailyState();
   if (state.audit.remaining <= 0 || state.total.remaining <= 0) return { ok: false, error: `Limite du jour atteinte (${cfg.dailyLimit} mails). Augmente MAIL_DAILY_LIMIT quand ton domaine est réchauffé.` };

@@ -54,9 +54,9 @@ export async function enrichCompanyAction(companyId: string): Promise<R> {
   if (newEmail || newPhone || noteLines.length) {
     await db.transaction(async (tx) => {
       if (ct) {
-        if (newEmail || newPhone) await tx.update(schema.contacts).set({ ...(newEmail ? { email: newEmail } : {}), ...(newPhone ? { phone: newPhone } : {}) }).where(eq(schema.contacts.id, ct.id));
+        if (newEmail || newPhone) await tx.update(schema.contacts).set({ ...(newEmail ? { email: newEmail, emailSource: "site" } : {}), ...(newPhone ? { phone: newPhone } : {}) }).where(eq(schema.contacts.id, ct.id));
       } else if (best || phone) {
-        await tx.insert(schema.contacts).values({ companyId: c.id, firstName: "Standard", lastName: "", role: "Standard", email: best, phone, isPrimary: true });
+        await tx.insert(schema.contacts).values({ companyId: c.id, firstName: "Standard", lastName: "", role: "Standard", email: best, emailSource: best ? "site" : "", phone, isPrimary: true });
       }
       if (noteLines.length) await tx.update(schema.companies).set({ notes: [c.notes.trim(), ...noteLines].filter(Boolean).join("\n") }).where(eq(schema.companies.id, c.id));
       await logEvent(tx, c.id, "note", `Coordonnées cherchées automatiquement${site ? ` sur ${hostOf(site)}` : ""} : ${[newEmail && `e-mail ${newEmail}`, newPhone && `téléphone ${newPhone}`].filter(Boolean).join(", ") || "rien de nouveau"}`);

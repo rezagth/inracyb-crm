@@ -205,6 +205,7 @@ export async function prospectList() {
       contact: ct ? [ct.firstName, ct.lastName].filter(Boolean).join(" ") : "",
       role: ct?.role ?? "",
       email: ct?.email ?? "",
+      emailSource: ct?.emailSource ?? "",
       phone: ct?.phone ?? "",
     };
   });

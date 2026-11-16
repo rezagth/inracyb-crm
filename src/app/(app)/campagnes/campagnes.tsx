@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
-import { createCampaignAction, runCampaignsNowAction, setCampaignStatusAction, stopItemAction } from "@/server/actions/campaigns";
+import { createCampaignAction, resumeServiceAction, runCampaignsNowAction, setCampaignStatusAction, stopItemAction } from "@/server/actions/campaigns";
 import { Card } from "@/components/ui";
 import { Icon } from "@/components/icon";
 import { useToast } from "@/components/mod/toast";
@@ -15,11 +15,12 @@ type Item = { id: string; company: string; step: number; due: string; status: st
 type Stats = { contacted: number; mails: number; replies: number; bounces: number; spam: number; optouts: number };
 type Health = { missing: boolean; lastRun: { at: string; source: string; ok: boolean; message: string } | null; events: Record<string, number> };
 type C = { id: string; name: string; offer: string; service: ServiceKey; status: string; stats: Stats; items: Item[] };
+type Status = { paused: boolean; reason: string; sent: number; bounces: number; complaints: number };
 type Diag = { open: boolean; limit: number; sent: number; stage: number; stages: number[]; target: number; every: number; firstSendOn: string | null };
 
 const STATUS: Record<string, string> = { active: "En cours", pause: "En pause", terminee: "Terminée" };
 
-export function Campagnes({ prospects, offers, ready, urlOk, dailyLimit, sentToday, diagnostic, total, restDays, fromEmail, health, campaigns: allCampaigns }: { prospects: P[]; offers: OfferKey[]; ready: boolean; urlOk: boolean; dailyLimit: number; sentToday: number; diagnostic: Diag; total: { limit: number; sent: number }; restDays: number; fromEmail: string; health: Health; campaigns: C[] }) {
+export function Campagnes({ prospects, offers, ready, urlOk, dailyLimit, sentToday, diagnostic, total, restDays, status, pauseRule, fromEmail, health, campaigns: allCampaigns }: { prospects: P[]; offers: OfferKey[]; ready: boolean; urlOk: boolean; dailyLimit: number; sentToday: number; diagnostic: Diag; total: { limit: number; sent: number }; restDays: number; status: Record<ServiceKey, Status>; pauseRule: { windowDays: number; minSends: number; maxBounceRate: number }; fromEmail: string; health: Health; campaigns: C[] }) {
   const router = useRouter();
   const toast = useToast();
   const [pending, start] = useTransition();
@@ -90,6 +91,19 @@ export function Campagnes({ prospects, offers, ready, urlOk, dailyLimit, sentTod
         <span className="text-xs text-subtle-fg">Total du jour : {total.sent}/{total.limit} · une seule séquence à la fois par entreprise · {restDays} jours de repos avant de passer d&apos;un service à l&apos;autre</span>
       </div>
 
+      {status[tab].paused ? (
+        <div className="tip flex flex-wrap items-center gap-3" role="alert">
+          <span>
+            <strong>Service {SERVICE_LABEL[tab]} en pause : plus aucun envoi.</strong> Motif : {status[tab].reason}. Corrige la cause (adresses en rebond, ciblage, texte) avant de reprendre.
+          </span>
+          <button type="button" className="btn btn-sec btn-sm" disabled={pending} onClick={() => window.confirm(`Reprendre les envois du service ${SERVICE_LABEL[tab]} ? Le suivi des rebonds repart de zéro.`) && run(() => resumeServiceAction(tab))}>Reprendre le service</button>
+        </div>
+      ) : (
+        <p className="text-xs text-subtle-fg">
+          Santé du service {SERVICE_LABEL[tab]} sur {pauseRule.windowDays} jours : {status[tab].sent} envoi(s) · {status[tab].bounces} rebond(s){status[tab].sent > 0 ? ` (${((status[tab].bounces / status[tab].sent) * 100).toLocaleString("fr-FR", { maximumFractionDigits: 1 })} %)` : ""} · {status[tab].complaints} plainte(s). Pause automatique à la première plainte, ou au-delà de {pauseRule.maxBounceRate * 100} % de rebonds à partir de {pauseRule.minSends} envois.
+        </p>
+      )}
+
       {tab === "diagnostic" && (
         <Card title="Service Diagnostic" actions={<span className="text-xs text-subtle-fg">{diagnostic.sent}/{diagnostic.limit} mails aujourd&apos;hui</span>}>
           <div className="flex flex-col gap-2 p-5 text-[13px]">
@@ -118,7 +132,7 @@ export function Campagnes({ prospects, offers, ready, urlOk, dailyLimit, sentTod
           <div className="flex flex-wrap items-center gap-3 text-[13px]">
             <button type="button" className="btn btn-sec btn-sm" onClick={() => setSel(new Set([...sel, ...shown.map((p) => p.id)]))}>Tout sélectionner ({shown.length})</button>
             <button type="button" className="btn btn-sec btn-sm" onClick={() => setSel(new Set())}>Tout désélectionner</button>
-            <span className="text-muted-fg">{eligible.length} entreprise(s) éligible(s){excluded ? ` · ${excluded} exclue(s) (pas d'e-mail, perdue, désinscrite, déjà en campagne, avancée ou en délai de repos)` : ""}</span>
+            <span className="text-muted-fg">{eligible.length} entreprise(s) éligible(s){excluded ? ` · ${excluded} exclue(s) (pas d'e-mail, perdue, désinscrite, déjà en campagne, avancée, en délai de repos ou adresse d'origine inconnue)` : ""}</span>
           </div>
           <div className="max-h-[320px] overflow-auto rounded-lg border border-border">
             {eligible.length === 0 ? (
@@ -198,7 +212,7 @@ export function Campagnes({ prospects, offers, ready, urlOk, dailyLimit, sentTod
                           <td className="td text-right">
                             {i.status === "en_cours" && (
                               <>
-                                <button type="button" className="btn btn-sec btn-sm" disabled={pending} onClick={() => run(() => stopItemAction(i.id, "reponse"))}>A répondu</button>{" "}
+                                <button type="button" className="btn btn-sec btn-sm" disabled={pending} onClick={() => run(() => stopItemAction(i.id, "reponse"))}>Réponse reçue</button>{" "}
                                 <button type="button" className="btn btn-sec btn-sm" disabled={pending} onClick={() => window.confirm(`Désinscrire ${i.company} de toute campagne ?`) && run(() => stopItemAction(i.id, "desinscrit"))}>Stop</button>
                               </>
                             )}

@@ -63,3 +63,10 @@ Les plafonds sont dans le code (`src/lib/campaign.ts`) : aucune variable n'est �
 - Le déclenchement automatique n'envoie rien les jours fériés ; les mails dus partent au jour ouvré suivant.
 
 Prérequis côté Brevo : domaine infracyb.fr authentifié, expéditeur contact@infracyb.fr validé, téléphone vérifié.
+
+### Garde-fous d'envoi (communs aux deux services)
+
+- **Pause automatique** : un service s'arrête à la première plainte pour spam, ou au-delà de 2 % de rebonds sur 30 jours (au moins 30 envois et 2 rebonds). Une tâche prioritaire est créée et un bandeau s'affiche sur la page Campagnes ; la reprise est manuelle (bouton « Reprendre le service »). Les événements Brevo reçus avant cette version ne sont pas comptés.
+- **Réponse reçue** : bouton sur la page Campagnes et sur la fiche de l'entreprise. Il arrête la séquence et crée une tâche prioritaire.
+- **Origine des adresses** : chaque adresse garde son origine (saisie à la main, publiée sur le site, historique). Sans origine connue, aucun envoi. Les adresses historiques ne sont admises que pour le service Audit.
+- Migration : `npm run db:migrate`, ou la section « Phase B » de `drizzle-manuel-diagnostic.sql`, **avant** de déployer le code (le CRM lit la colonne `contacts.email_source`).

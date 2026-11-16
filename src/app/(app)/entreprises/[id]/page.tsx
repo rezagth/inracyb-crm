@@ -1,3 +1,6 @@
+import { and, eq } from "drizzle-orm";
+import { db, schema } from "@/db";
+import { emailSourceLabel } from "@/lib/campaign";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getCompany, invoiceTotals } from "@/server/queries";
@@ -9,7 +12,7 @@ import { Avatar, Badge, Card, EmptyState, PageHeader, toneFor } from "@/componen
 import { Icon, type IconName } from "@/components/icon";
 import { EnrichButton } from "@/components/enrich-button";
 import { CompanyForm } from "../company-form";
-import { ActivityForm, ContactForm, DeleteCompanyButton, DeleteContactButton, StageSelect, TaskForm } from "./forms";
+import { ActivityForm, ContactForm, DeleteCompanyButton, DeleteContactButton, ReplyReceivedButton, StageSelect, TaskForm } from "./forms";
 import { TaskCheck } from "../../taches/task-check";
 
 /** La recherche d'e-mails lit des sites web : on laisse jusqu'à 60 s à chaque action. */
@@ -34,6 +37,7 @@ export default async function CompanyPage({ params, searchParams }: { params: Pr
   const st = statusOfStage(c.stage);
   const primary = c.contacts.find((x) => x.isPrimary) ?? c.contacts[0];
   const t = today();
+  const inSequence = !!(await db.select({ id: schema.mailCampaignItems.id }).from(schema.mailCampaignItems).where(and(eq(schema.mailCampaignItems.companyId, c.id), eq(schema.mailCampaignItems.status, "en_cours"))).limit(1))[0];
 
   return (
     <>
@@ -57,6 +61,7 @@ export default async function CompanyPage({ params, searchParams }: { params: Pr
         actions={
           <>
             <StageSelect id={c.id} stage={c.stage} />
+            {inSequence && <ReplyReceivedButton companyId={c.id} />}
             <EnrichButton companyId={c.id} />
             <Link href={`/prospection?co=${c.id}&call=1`} className="btn btn-sec">
               <Icon name="phone" />
@@ -143,7 +148,7 @@ export default async function CompanyPage({ params, searchParams }: { params: Pr
                         {ct.firstName} {ct.lastName} {ct.isPrimary && <Badge tone="info">Principal</Badge>}
                       </td>
                       <td className="td text-muted-fg">{ct.role || "—"}</td>
-                      <td className="td">{ct.email ? <a className="link" href={`mailto:${ct.email}`}>{ct.email}</a> : "—"}</td>
+                      <td className="td">{ct.email ? <><a className="link" href={`mailto:${ct.email}`}>{ct.email}</a> <span className="text-xs text-subtle-fg">· {emailSourceLabel(ct.emailSource)}</span></> : "—"}</td>
                       <td className="td num">{ct.phone ? <a className="link" href={`tel:${ct.phone.replace(/\s/g, "")}`}>{ct.phone}</a> : "—"}</td>
                       <td className="td text-right">
                         <DeleteContactButton id={ct.id} companyId={c.id} />

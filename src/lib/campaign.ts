@@ -21,7 +21,7 @@ export function nextDueAfterSend(sentOn: string, justSentStep: number): string |
   return addDaysIso(sentOn, next - SEQUENCE_DAYS[justSentStep]);
 }
 
-export type Candidate = { id: string; name: string; stage: string; email: string };
+export type Candidate = { id: string; name: string; stage: string; email: string; /** origine de l'adresse (voir EmailSource) ; absente = non contrôlée */ emailSource?: string };
 
 export type Exclusion = "perdu" | "avance" | "sans-email" | "email-invalide" | "desinscrit" | "deja-en-campagne";
 export const EXCLUSION_LABEL: Record<Exclusion, string> = {
@@ -196,12 +196,13 @@ export const REPLIED_REASON = "A répondu";
 /** Ce qu'une entreprise a déjà vécu dans l'autre service. */
 export type CrossHistory = { /** dernier mail reçu au titre de l'autre service */ lastSend: string | null; /** a répondu à une séquence de l'autre service */ replied: boolean; /** a déjà reçu ce service-ci */ sameServiceSent: boolean };
 
-export type EntryExclusion = Exclusion | "a-repondu" | "repos" | "deja-diagnostique";
+export type EntryExclusion = Exclusion | "a-repondu" | "repos" | "deja-diagnostique" | "origine";
 export const ENTRY_EXCLUSION_LABEL: Record<EntryExclusion, string> = {
   ...EXCLUSION_LABEL,
   "a-repondu": "a déjà répondu à une autre séquence",
   repos: "délai de repos après la séquence précédente",
   "deja-diagnostique": "a déjà reçu le diagnostic",
+  origine: "origine de l'adresse inconnue ou non vérifiée",
 };
 
 /** Reconstitue l'historique d'une entreprise vu depuis le service visé, à partir des envois et des séquences arrêtées sur réponse. */
@@ -218,9 +219,59 @@ export function crossHistory(target: ServiceKey, sends: { offer: string; sentOn:
  */
 export function entryExclusion(c: Candidate, optouts: Set<string>, inCampaign: Set<string>, target: ServiceKey, h: CrossHistory | undefined, today: string, restDays = REST_DAYS_DEFAULT): EntryExclusion | null {
   const base = exclusionOf(c, optouts, inCampaign);
-  if (base || !h) return base;
+  if (base) return base;
+  if (c.emailSource !== undefined && originBlock(c.emailSource, target)) return "origine";
+  if (!h) return null;
   if (h.replied) return "a-repondu";
   if (h.lastSend && addDaysIso(h.lastSend, restDays) > today) return "repos";
   if (target === "diagnostic" && h.sameServiceSent) return "deja-diagnostique";
   return null;
+}
+
+// ——— Pause automatique d'un service : rebonds et plaintes ———
+
+/**
+ * Règle de pause, calculée sur les 30 derniers jours (ou depuis la dernière reprise) :
+ * première plainte pour spam, ou taux de rebond au-dessus de 2 % avec au moins 30 envois et 2 rebonds
+ * (un rebond isolé sur un petit volume ne suffit pas à conclure).
+ */
+export const PAUSE_RULE = { windowDays: 30, minSends: 30, minBounces: 2, maxBounceRate: 0.02 } as const;
+export type ServiceHealth = { sent: number; bounces: number; complaints: number };
+
+const pct = (x: number) => (Math.round(x * 1000) / 10).toLocaleString("fr-FR") + " %";
+
+/** Motif de mise en pause, ou null si le service peut continuer. */
+export function pauseReason(h: ServiceHealth): string | null {
+  if (h.complaints > 0) return `${h.complaints} plainte(s) pour spam`;
+  if (h.sent >= PAUSE_RULE.minSends && h.bounces >= PAUSE_RULE.minBounces && h.bounces / h.sent > PAUSE_RULE.maxBounceRate) return `Taux de rebond de ${pct(h.bounces / h.sent)} (${h.bounces} rebonds sur ${h.sent} envois, seuil ${pct(PAUSE_RULE.maxBounceRate)})`;
+  return null;
+}
+
+/** Service d'un événement Brevo d'après les tags posés à l'envoi (« crm », « campagne », l'offre, l'étape). Null si aucun tag d'offre. */
+export function serviceFromTags(tags: unknown): ServiceKey | null {
+  let list: unknown = tags;
+  if (typeof list === "string") {
+    try { list = JSON.parse(list); } catch { list = [list]; }
+  }
+  if (!Array.isArray(list)) return null;
+  const t = list.filter((x): x is string => typeof x === "string").map((x) => x.toLowerCase());
+  if (t.includes("diagnostic")) return "diagnostic";
+  return t.some((x) => x === "audit" || x === "ciso" || x === "ia") ? "audit" : null;
+}
+
+// ——— Origine des adresses : on n'écrit jamais à une adresse dont on ne sait pas d'où elle vient ———
+
+/** saisie : tapée dans le CRM · site : publiée sur le site de l'entreprise · historique : présente avant le suivi de l'origine. */
+export type EmailSource = "saisie" | "site" | "historique";
+export const EMAIL_SOURCE_LABEL: Record<EmailSource, string> = { saisie: "saisie à la main", site: "publiée sur le site", historique: "historique (avant le suivi de l'origine)" };
+export const emailSourceLabel = (s: string): string => EMAIL_SOURCE_LABEL[s as EmailSource] ?? "origine inconnue";
+
+/**
+ * Pourquoi cette adresse ne peut pas recevoir de mail de ce service (null = envoi permis).
+ * Origine inconnue : jamais. Origine « historique » : tolérée pour le service audit (campagne en cours), refusée pour le diagnostic.
+ */
+export function originBlock(source: string, service: ServiceKey): string | null {
+  if (source === "saisie" || source === "site") return null;
+  if (source === "historique") return service === "audit" ? null : "Origine de l'adresse non vérifiée (adresse historique) : ressaisis-la sur la fiche pour le diagnostic.";
+  return "Origine de l'adresse inconnue : ressaisis-la sur la fiche.";
 }

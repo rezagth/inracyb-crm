@@ -3,7 +3,8 @@ import { NextResponse, type NextRequest } from "next/server";
 import { db, schema } from "@/db";
 import { EMAIL_RE } from "@/lib/brevo";
 import { classifyBrevoEvent } from "@/lib/brevo-events";
-import { recordOptout } from "@/server/campaigns";
+import { serviceFromTags } from "@/lib/campaign";
+import { checkServicePauses, recordOptout, serviceOfLastSend } from "@/server/campaigns";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -31,10 +32,13 @@ export async function POST(req: NextRequest) {
       const email = typeof o.email === "string" ? o.email.trim().toLowerCase() : "";
       if (!c || !EMAIL_RE.test(email)) continue;
       const detail = typeof o.reason === "string" ? o.reason.slice(0, 300) : "";
-      await db.insert(schema.mailEvents).values({ email, type: c.kind, detail });
+      const service = serviceFromTags(o.tags ?? o.tag) ?? (await serviceOfLastSend(email)) ?? "";
+      await db.insert(schema.mailEvents).values({ email, type: c.kind, detail, service });
       if (c.suppress) await recordOptout(email, "brevo:" + c.kind, c.reason);
       handled++;
     }
+    // Rebond ou plainte : on réévalue tout de suite la pause automatique de chaque service.
+    if (handled) await checkServicePauses();
   } catch (e) {
     console.error("webhook Brevo : traitement échoué", e);
     return NextResponse.json({ error: "Erreur de traitement" }, { status: 500 });

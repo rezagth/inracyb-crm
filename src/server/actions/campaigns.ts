@@ -5,11 +5,11 @@ import { and, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { db, schema } from "@/db";
 import { requireUser } from "@/lib/auth";
-import { CAMPAIGN_OFFERS, DIAGNOSTIC_OPEN, entryExclusion, ENTRY_EXCLUSION_LABEL, serviceOf, type EntryExclusion } from "@/lib/campaign";
+import { CAMPAIGN_OFFERS, DIAGNOSTIC_OPEN, REPLIED_REASON, entryExclusion, ENTRY_EXCLUSION_LABEL, serviceOf, type EntryExclusion } from "@/lib/campaign";
 import { today } from "@/lib/format";
 import { prospectList } from "../queries";
 import { logEvent } from "../core";
-import { crossHistories, optoutSet, recordOptout, recordRun, restDays, runCampaigns } from "../campaigns";
+import { crossHistories, optoutSet, recordOptout, recordRun, restDays, resumeService, runCampaigns } from "../campaigns";
 
 type R = { ok: true; message: string } | { ok: false; error: string };
 const offerZ = z.enum(CAMPAIGN_OFFERS as [string, ...string[]]);
@@ -42,11 +42,11 @@ export async function createCampaignAction(name: string, offer: string, companyI
   const eligible: string[] = [];
   const excluded: Partial<Record<EntryExclusion, number>> = {};
   for (const p of (await prospectList()).filter((p) => wanted.has(p.id))) {
-    const ex = entryExclusion({ id: p.id, name: p.name, stage: p.stage, email: p.email }, optouts, inCampaign, target, history.get(p.id), t, rest);
+    const ex = entryExclusion({ id: p.id, name: p.name, stage: p.stage, email: p.email, emailSource: p.emailSource }, optouts, inCampaign, target, history.get(p.id), t, rest);
     if (ex) excluded[ex] = (excluded[ex] ?? 0) + 1;
     else eligible.push(p.id);
   }
-  if (!eligible.length) return { ok: false, error: "Aucune des entreprises choisies n'est éligible (e-mail manquant, perdue, désinscrite, déjà en campagne ou en délai de repos)." };
+  if (!eligible.length) return { ok: false, error: "Aucune des entreprises choisies n'est éligible (e-mail manquant, perdue, désinscrite, déjà en campagne, en délai de repos ou adresse d'origine inconnue)." };
 
   // Campagne et entrées dans la même transaction : si une entreprise vient d'entrer dans une autre séquence (index unique), rien n'est créé.
   let camp: { id: string };
@@ -98,7 +98,47 @@ export async function stopItemAction(itemId: string, kind: string): Promise<R> {
     const ct = (await db.select().from(schema.contacts).where(eq(schema.contacts.companyId, item.companyId))).find((c) => c.email.trim());
     if (ct) await recordOptout(ct.email, "demande manuelle");
   }
-  await db.update(schema.mailCampaignItems).set({ status: "arrete", stopReason: k.data === "reponse" ? "A répondu" : "Désinscrit" }).where(eq(schema.mailCampaignItems.id, itemId));
+  if (k.data === "desinscrit") {
+    await db.update(schema.mailCampaignItems).set({ status: "arrete", stopReason: "Désinscrit" }).where(eq(schema.mailCampaignItems.id, itemId));
+    revalidatePath("/campagnes");
+    return { ok: true, message: "Désinscrit : plus aucun mail de campagne." };
+  }
+  return replyReceived(item.companyId);
+}
+
+/** Réponse reçue : arrête toute séquence en cours de l'entreprise, le note au journal et crée une tâche prioritaire pour y répondre. */
+async function replyReceived(companyId: string): Promise<R> {
+  const c = (await db.select({ name: schema.companies.name }).from(schema.companies).where(eq(schema.companies.id, companyId)).limit(1))[0];
+  if (!c) return { ok: false, error: "Entreprise introuvable." };
+  const t = today();
+  const title = `Répondre à ${c.name} (réponse à une campagne)`;
+  await db.transaction(async (tx) => {
+    await tx.update(schema.mailCampaignItems).set({ status: "arrete", stopReason: REPLIED_REASON, lastError: "" }).where(and(eq(schema.mailCampaignItems.companyId, companyId), eq(schema.mailCampaignItems.status, "en_cours")));
+    await logEvent(tx, companyId, "mail", "Réponse reçue : relances de campagne arrêtées.");
+    if (!(await tx.select({ id: schema.tasks.id }).from(schema.tasks).where(and(eq(schema.tasks.title, title), eq(schema.tasks.done, false))).limit(1))[0]) await tx.insert(schema.tasks).values({ title, companyId, dueDate: t, priority: "haute" });
+  });
   revalidatePath("/campagnes");
-  return { ok: true, message: k.data === "reponse" ? "Relances arrêtées." : "Désinscrit : plus aucun mail de campagne." };
+  revalidatePath(`/entreprises/${companyId}`);
+  revalidatePath("/", "layout");
+  return { ok: true, message: `Relances arrêtées. Tâche créée : répondre à ${c.name}.` };
+}
+
+/** Bouton « Réponse reçue » de la fiche entreprise : même effet que sur la page Campagnes, sans chercher la ligne. */
+export async function replyReceivedAction(companyId: string): Promise<R> {
+  await requireUser();
+  const id = z.string().min(1).max(64).safeParse(companyId);
+  if (!id.success) return { ok: false, error: "Entreprise invalide." };
+  const active = (await db.select({ id: schema.mailCampaignItems.id }).from(schema.mailCampaignItems).where(and(eq(schema.mailCampaignItems.companyId, id.data), eq(schema.mailCampaignItems.status, "en_cours"))).limit(1))[0];
+  if (!active) return { ok: false, error: "Cette entreprise n'a aucune séquence en cours." };
+  return replyReceived(id.data);
+}
+
+/** Reprend un service mis en pause automatiquement (rebonds, plainte). À faire après avoir corrigé la cause. */
+export async function resumeServiceAction(service: string): Promise<R> {
+  await requireUser();
+  const s = z.enum(["audit", "diagnostic"]).safeParse(service);
+  if (!s.success) return { ok: false, error: "Service invalide." };
+  await resumeService(s.data);
+  revalidatePath("/campagnes");
+  return { ok: true, message: "Service repris : les envois repartent au prochain déclenchement." };
 }

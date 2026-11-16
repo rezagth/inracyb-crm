@@ -115,6 +115,8 @@ export const contacts = pgTable(
     lastName: text("last_name").notNull().default(""),
     role: text("role").notNull().default(""),
     email: text("email").notNull().default(""),
+    /** Origine de l'adresse : saisie | site | historique | "" (inconnue : aucun envoi). */
+    emailSource: text("email_source").notNull().default(""),
     phone: text("phone").notNull().default(""),
     isPrimary: boolean("is_primary").notNull().default(false),
     createdAt: createdAt(),
@@ -328,10 +330,20 @@ export const mailEvents = pgTable(
     email: text("email").notNull(),
     type: text("type").notNull(),
     detail: text("detail").notNull().default(""),
+    /** Service concerné (audit | diagnostic), d'après les tags de l'envoi ; "" si inconnu. */
+    service: text("service").notNull().default(""),
     createdAt: createdAt(),
   },
   (t) => [index("mail_events_email_idx").on(t.email), index("mail_events_type_idx").on(t.type, t.createdAt)],
 );
+
+/** État d'un service d'envoi (audit | diagnostic) : en pause automatique ou non, pourquoi, et depuis quand (la reprise remet le compteur de santé à zéro). */
+export const mailServiceState = pgTable("mail_service_state", {
+  service: text("service").primaryKey(),
+  paused: boolean("paused").notNull().default(false),
+  reason: text("reason").notNull().default(""),
+  changedAt: timestamp("changed_at", { mode: "date", withTimezone: true }).notNull().defaultNow(),
+});
 
 /** Journal des déclenchements de campagne (quotidien automatique ou manuel) : permet de voir un échec sans ouvrir les logs Vercel. */
 export const mailRuns = pgTable("mail_runs", {

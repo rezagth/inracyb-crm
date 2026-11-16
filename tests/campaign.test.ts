@@ -179,3 +179,40 @@ test("non-régression audit : sans historique diagnostic, l'éligibilité est ex
     assert.equal(entryExclusion(c, optouts, inC, "audit", crossHistory("audit", sends, ["audit"]), T), exclusionOf(c, optouts, inC));
   }
 });
+
+// ——— Phase B : pause automatique et origine des adresses ———
+import { originBlock, pauseReason, serviceFromTags } from "../src/lib/campaign";
+
+test("pause automatique : première plainte, ou plus de 2 % de rebonds sur au moins 30 envois et 2 rebonds", () => {
+  assert.equal(pauseReason({ sent: 0, bounces: 0, complaints: 0 }), null);
+  assert.match(pauseReason({ sent: 1, bounces: 0, complaints: 1 }) ?? "", /plainte/);
+  assert.equal(pauseReason({ sent: 29, bounces: 5, complaints: 0 }), null); // pas assez d'envois pour conclure
+  assert.equal(pauseReason({ sent: 40, bounces: 1, complaints: 0 }), null); // un rebond isolé (2,5 %) ne suffit pas
+  assert.match(pauseReason({ sent: 40, bounces: 2, complaints: 0 }) ?? "", /Taux de rebond de 5 %/);
+  assert.equal(pauseReason({ sent: 100, bounces: 2, complaints: 0 }), null); // 2 % pile : sous le seuil
+  assert.match(pauseReason({ sent: 100, bounces: 3, complaints: 0 }) ?? "", /3 rebonds sur 100 envois/);
+});
+
+test("service d'un événement Brevo d'après ses tags", () => {
+  assert.equal(serviceFromTags(["crm", "campagne", "diagnostic", "J0"]), "diagnostic");
+  assert.equal(serviceFromTags(["crm", "campagne", "audit", "J+3"]), "audit");
+  assert.equal(serviceFromTags(["crm", "prospection", "ciso", "J0"]), "audit");
+  assert.equal(serviceFromTags('["crm","campagne","diagnostic"]'), "diagnostic");
+  assert.equal(serviceFromTags("audit"), "audit");
+  for (const t of [undefined, null, 42, [], ["crm"], "n'importe quoi", { a: 1 }]) assert.equal(serviceFromTags(t), null);
+});
+
+test("origine des adresses : inconnue jamais, historique pour l'audit seulement", () => {
+  for (const s of ["saisie", "site"]) for (const k of ["audit", "diagnostic"] as const) assert.equal(originBlock(s, k), null);
+  assert.equal(originBlock("historique", "audit"), null);
+  assert.match(originBlock("historique", "diagnostic") ?? "", /historique/);
+  for (const s of ["", "achetee", "generee"]) for (const k of ["audit", "diagnostic"] as const) assert.match(originBlock(s, k) ?? "", /inconnue/);
+  // À l'entrée en campagne : exclue si l'origine bloque ; sans information d'origine, la règle d'avant s'applique.
+  const c = { id: "c1", name: "A", stage: "qualif", email: "a@x.fr" };
+  const none = new Set<string>();
+  assert.equal(entryExclusion({ ...c, emailSource: "" }, none, none, "audit", undefined, "2026-11-16"), "origine");
+  assert.equal(entryExclusion({ ...c, emailSource: "historique" }, none, none, "audit", undefined, "2026-11-16"), null);
+  assert.equal(entryExclusion({ ...c, emailSource: "historique" }, none, none, "diagnostic", undefined, "2026-11-16"), "origine");
+  assert.equal(entryExclusion({ ...c, emailSource: "site" }, none, none, "diagnostic", undefined, "2026-11-16"), null);
+  assert.equal(entryExclusion(c, none, none, "audit", undefined, "2026-11-16"), null);
+});

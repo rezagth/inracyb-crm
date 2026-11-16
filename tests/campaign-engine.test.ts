@@ -16,6 +16,7 @@ process.env.BREVO_API_KEY = "cle-de-test";
 process.env.APP_URL = "https://crm.test";
 process.env.AUTH_SECRET = "un-secret-de-test-assez-long-1234567890";
 process.env.MAIL_FROM_EMAIL = "contact@infracyb.fr";
+process.env.BREVO_WEBHOOK_SECRET = "secret-webhook-de-test-123456";
 delete process.env.MAIL_DAILY_LIMIT;
 delete process.env.MAIL_DAILY_LIMIT_DIAGNOSTIC;
 delete process.env.CAMPAIGN_REST_DAYS;
@@ -43,9 +44,9 @@ globalThis.fetch = (async (_url: unknown, init?: { body?: string }) => {
 
 const T = new Intl.DateTimeFormat("fr-CA", { timeZone: "Europe/Paris", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
 
-async function company(name: string, email = name.toLowerCase().replace(/[^a-z0-9]/g, "") + "@exemple.fr") {
+async function company(name: string, source = "historique", email = name.toLowerCase().replace(/[^a-z0-9]/g, "") + "@exemple.fr") {
   const id = (await db.insert(schema.companies).values({ name, sector: "Juridique" }).returning({ id: schema.companies.id }))[0].id;
-  await db.insert(schema.contacts).values({ companyId: id, firstName: "Anne", lastName: "Martin", email, isPrimary: true });
+  await db.insert(schema.contacts).values({ companyId: id, firstName: "Anne", lastName: "Martin", email, emailSource: source, isPrimary: true });
   return id;
 }
 const sendsOf = async (offer: string) => (await db.select().from(schema.mailSends).where(eq(schema.mailSends.offer, offer))).length;
@@ -57,7 +58,7 @@ before(async () => {
   await migrate(db, { migrationsFolder: "./drizzle" });
   await db.insert(schema.settings).values({ id: 1 }).onConflictDoNothing();
   for (let i = 1; i <= 12; i++) auditIds.push(await company("Cabinet Audit " + i));
-  for (let i = 1; i <= 6; i++) diagIds.push(await company("Editeur Diag " + i));
+  for (let i = 1; i <= 6; i++) diagIds.push(await company("Editeur Diag " + i, "site"));
 });
 after(async () => {
   globalThis.fetch = realFetch;
@@ -181,4 +182,128 @@ test("délai de repos : une entreprise contactée en audit aujourd'hui n'entre p
   // Vu depuis l'audit, ces entreprises n'ont aucun historique dans l'autre service : rien ne change pour elles.
   const ha = await crossHistories("audit");
   assert.equal(entryExclusion(cand(auditIds[0]), none, none, "audit", ha.get(auditIds[0]), T, restDays()), null);
+});
+
+// ——— Phase B : origine des adresses, réponse reçue, désinscription en un clic, pause automatique ———
+
+test("origine des adresses : inconnue = aucun envoi ; historique = audit seulement", async () => {
+  const { runCampaigns } = await import("../src/server/campaigns");
+  const { createCampaignAction } = await import("../src/server/actions/campaigns");
+  const { sendSequenceMailAction } = await import("../src/server/actions/prospection");
+  // À la création : une adresse sans origine est exclue.
+  const unknown = await company("Cabinet Sans Origine", "");
+  const r = await createCampaignAction("Sans origine", "audit", [unknown]);
+  assert.equal(r.ok, false);
+  // À l'envoi manuel aussi.
+  const m = await sendSequenceMailAction(unknown, "audit", 0, "Objet", "Bonjour");
+  assert.match((m as { error: string }).error, /Origine de l'adresse inconnue/);
+  // Dans le moteur : une adresse historique placée dans une campagne diagnostic ne reçoit rien.
+  const histo = await company("Editeur Historique", "historique");
+  const camp = (await db.select().from(schema.mailCampaigns).where(eq(schema.mailCampaigns.offer, "diagnostic")))[0];
+  // On repart d'un jour neuf pour le diagnostic : les envois du jour sont antidatés.
+  await db.update(schema.mailSends).set({ sentOn: "2026-01-05" });
+  await db.update(schema.mailCampaignItems).set({ nextDue: "2099-01-01" }).where(eq(schema.mailCampaignItems.status, "en_cours"));
+  await db.insert(schema.mailCampaignItems).values({ campaignId: camp.id, companyId: histo, nextStep: 0, nextDue: T });
+  const before = outbox.length;
+  const run = await runCampaigns({ mailFor: () => ({ subject: "S", body: "B" }) });
+  assert.equal(run.sent, 0);
+  assert.equal(run.errors, 1);
+  assert.equal(outbox.length, before);
+  const item = (await db.select().from(schema.mailCampaignItems).where(eq(schema.mailCampaignItems.companyId, histo)))[0];
+  assert.match(item.lastError, /adresse historique/);
+  await db.update(schema.mailCampaignItems).set({ status: "arrete", stopReason: "Test" }).where(eq(schema.mailCampaignItems.companyId, histo));
+});
+
+test("réponse reçue : la séquence s'arrête, une tâche prioritaire est créée une seule fois, plus aucune relance", async () => {
+  const { stopItemAction, replyReceivedAction } = await import("../src/server/actions/campaigns");
+  const { runCampaigns } = await import("../src/server/campaigns");
+  const id = auditIds[2];
+  const item = (await db.select().from(schema.mailCampaignItems).where(eq(schema.mailCampaignItems.companyId, id)))[0];
+  assert.equal(item.status, "en_cours");
+  await db.update(schema.mailCampaignItems).set({ nextDue: T }).where(eq(schema.mailCampaignItems.id, item.id));
+  const r = await stopItemAction(item.id, "reponse");
+  assert.ok(r.ok);
+  const after = (await db.select().from(schema.mailCampaignItems).where(eq(schema.mailCampaignItems.id, item.id)))[0];
+  assert.deepEqual([after.status, after.stopReason], ["arrete", "A répondu"]);
+  const tasks = () => db.select().from(schema.tasks).where(eq(schema.tasks.companyId, id));
+  assert.equal((await tasks()).length, 1);
+  assert.deepEqual([(await tasks())[0].priority, (await tasks())[0].dueDate, (await tasks())[0].title], ["haute", T, "Répondre à Cabinet Audit 3 (réponse à une campagne)"]);
+  // Depuis la fiche : même effet sur une autre entreprise ; refus quand il n'y a plus de séquence.
+  const again = await replyReceivedAction(id);
+  assert.equal(again.ok, false);
+  assert.equal((await tasks()).length, 1);
+  const other = await replyReceivedAction(auditIds[3]);
+  assert.ok(other.ok);
+  assert.equal((await db.select().from(schema.mailCampaignItems).where(eq(schema.mailCampaignItems.companyId, auditIds[3])))[0].stopReason, "A répondu");
+  const before = outbox.length;
+  await runCampaigns();
+  assert.equal(outbox.filter((o) => o.to[0].email === "cabinetaudit3@exemple.fr").length, 1); // seulement le J0 d'origine
+  assert.equal(outbox.length, before);
+});
+
+test("désinscription en un clic : le lien de l'en-tête fonctionne en POST, l'affichage seul ne désinscrit pas", async () => {
+  const route = await import("../src/app/api/desabonnement/[token]/route");
+  const mail = outbox.find((o) => o.to[0].email === "cabinetaudit5@exemple.fr")!;
+  const token = mail.headers!["List-Unsubscribe"].slice(1, -1).split("/").pop()!;
+  const ctx = { params: Promise.resolve({ token }) };
+  const optouts = async () => (await db.select().from(schema.mailOptouts)).map((o) => o.email);
+  const get = await route.GET(new Request("https://crm.test/x") as never, ctx);
+  assert.equal(get.status, 200);
+  assert.deepEqual(await optouts(), []);
+  const post = await route.POST(new Request("https://crm.test/x", { method: "POST", body: "List-Unsubscribe=One-Click" }) as never, ctx);
+  assert.equal(post.status, 200);
+  assert.deepEqual(await optouts(), ["cabinetaudit5@exemple.fr"]);
+  const item = (await db.select().from(schema.mailCampaignItems).where(eq(schema.mailCampaignItems.companyId, auditIds[4])))[0];
+  assert.deepEqual([item.status, item.stopReason], ["arrete", "Désinscrit"]);
+  const bad = await route.POST(new Request("https://crm.test/x", { method: "POST" }) as never, { params: Promise.resolve({ token: "faux.jeton" }) });
+  assert.equal(bad.status, 400);
+});
+
+test("pause automatique : une plainte met le service en pause, sans toucher à l'autre ; reprise manuelle", async () => {
+  const hook = await import("../src/app/api/webhooks/brevo/route");
+  const { runCampaigns, checkServicePauses } = await import("../src/server/campaigns");
+  const { resumeServiceAction } = await import("../src/server/actions/campaigns");
+  const { sendSequenceMailAction } = await import("../src/server/actions/prospection");
+  const post = (events: unknown) => hook.POST(Object.assign(new Request("https://crm.test/api/webhooks/brevo?key=secret-webhook-de-test-123456", { method: "POST", body: JSON.stringify(events) }), { nextUrl: new URL("https://crm.test/api/webhooks/brevo?key=secret-webhook-de-test-123456") }) as never);
+
+  // Un rebond isolé sur le diagnostic : noté, rattaché au bon service par ses tags, pas de pause.
+  assert.equal((await post([{ event: "hard_bounce", email: "editeurdiag1@exemple.fr", tags: ["crm", "campagne", "diagnostic", "J0"] }])).status, 200);
+  let st = await checkServicePauses();
+  assert.deepEqual([st.diagnostic.paused, st.diagnostic.health.bounces, st.audit.health.bounces], [false, 1, 0]);
+
+  // Une plainte sur l'audit, sans tag : rattachée par le dernier envoi à cette adresse.
+  assert.equal((await post({ event: "spam", email: "cabinetaudit6@exemple.fr" })).status, 200);
+  st = await checkServicePauses();
+  assert.equal(st.audit.paused, true);
+  assert.match(st.audit.reason, /1 plainte\(s\) pour spam/);
+  assert.equal(st.diagnostic.paused, false);
+  const alert = (await db.select().from(schema.tasks)).filter((t) => t.title.startsWith("Service Audit en pause"));
+  assert.equal(alert.length, 1);
+  assert.equal(alert[0].priority, "haute");
+
+  // L'audit n'envoie plus rien (campagne ni envoi manuel) ; le diagnostic continue.
+  await db.update(schema.mailCampaignItems).set({ nextDue: T }).where(eq(schema.mailCampaignItems.status, "en_cours"));
+  const before = outbox.length;
+  const run = await runCampaigns({ mailFor: (offer) => (offer === "diagnostic" ? { subject: "S", body: "B" } : null) });
+  assert.match(run.message, /Service Audit en pause/);
+  const sentNow = outbox.slice(before);
+  assert.ok(sentNow.length > 0);
+  assert.ok(sentNow.every((o) => o.tags?.includes("diagnostic")));
+  const manual = await sendSequenceMailAction(auditIds[7], "ciso", 0, "Objet", "Bonjour");
+  assert.match((manual as { error: string }).error, /Envois en pause/);
+
+  // Pas de seconde tâche d'alerte tant que la pause dure.
+  await checkServicePauses();
+  assert.equal((await db.select().from(schema.tasks)).filter((t) => t.title.startsWith("Service Audit en pause")).length, 1);
+
+  // Reprise : le compteur repart de zéro, l'ancienne plainte ne remet pas le service en pause.
+  assert.ok((await resumeServiceAction("audit")).ok);
+  st = await checkServicePauses();
+  assert.deepEqual([st.audit.paused, st.audit.health.complaints], [false, 0]);
+  const resumed = await runCampaigns();
+  assert.ok(resumed.sent > 0);
+
+  // Webhook : clé fausse refusée.
+  const bad = await hook.POST(Object.assign(new Request("https://crm.test/x", { method: "POST", body: "[]" }), { nextUrl: new URL("https://crm.test/x?key=mauvaise") }) as never);
+  assert.equal(bad.status, 401);
 });

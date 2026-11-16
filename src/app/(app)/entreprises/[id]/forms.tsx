@@ -3,6 +3,8 @@
 import { useActionState, useRef, useEffect, useTransition } from "react";
 import { addActivityAction, addContactAction, deleteContactAction, deleteCompanyAction, moveStageAction } from "@/server/actions/companies";
 import { createTaskAction } from "@/server/actions/tasks";
+import { replyReceivedAction } from "@/server/actions/campaigns";
+import { useToast } from "@/components/mod/toast";
 import { STAGES } from "@/lib/constants";
 import { today } from "@/lib/format";
 import { FormMessage, SubmitButton } from "@/components/form";
@@ -85,6 +87,18 @@ export function ContactForm({ companyId }: { companyId: string }) {
         <FormMessage state={state} />
       </div>
     </form>
+  );
+}
+
+/** Visible seulement quand l'entreprise est dans une séquence de campagne : un clic arrête les relances et crée la tâche « répondre ». */
+export function ReplyReceivedButton({ companyId }: { companyId: string }) {
+  const [pending, start] = useTransition();
+  const toast = useToast();
+  return (
+    <button type="button" className="btn btn-pri" disabled={pending} onClick={() => start(async () => { const r = await replyReceivedAction(companyId); toast(r.ok ? r.message : r.error); })}>
+      <Icon name="mail" />
+      Réponse reçue
+    </button>
   );
 }
 
