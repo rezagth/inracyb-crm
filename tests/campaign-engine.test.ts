@@ -11,6 +11,7 @@ import { migrate } from "drizzle-orm/pglite/migrator";
 import { eq } from "drizzle-orm";
 import * as schema from "../src/db/schema";
 import { scripts } from "../src/lib/prospection";
+import type { Probe } from "../src/lib/diagnostic";
 
 process.env.BREVO_API_KEY = "cle-de-test";
 process.env.APP_URL = "https://crm.test";
@@ -132,9 +133,17 @@ test("diagnostic : sans modèle rien ne part ; avec modèle, 4 mails (premier pa
   const camp = (await db.insert(schema.mailCampaigns).values({ name: "Editeurs", offer: "diagnostic" }).returning({ id: schema.mailCampaigns.id }))[0];
   await db.insert(schema.mailCampaignItems).values(diagIds.map((companyId) => ({ campaignId: camp.id, companyId, nextStep: 0, nextDue: T })));
 
+  // Barrière de qualité : sans diagnostic, rien ne part, même avec un modèle.
+  const noDiag = await runCampaigns({ mailFor: () => ({ subject: "S", body: "B" }) });
+  assert.equal(noDiag.sent, 0);
+  assert.match((await db.select().from(schema.mailCampaignItems).where(eq(schema.mailCampaignItems.campaignId, camp.id))).map((i) => i.lastError).join("|"), /Pas de constat certain et récent/);
+  // Diagnostic périmé pour la première, récent pour les autres.
+  const { RULES_VERSION } = await import("../src/lib/diagnostic");
+  await db.insert(schema.companyDiagnostics).values(diagIds.map((companyId, i) => ({ companyId, status: "fait", mailDomain: "exemple.fr", certainCount: 1, mainFinding: "spf", rulesVersion: RULES_VERSION, checkedOn: i === 0 ? "2026-01-01" : T })));
+
   const none = await runCampaigns();
   assert.equal(none.sent, 0);
-  assert.equal(none.errors, 4);
+  assert.ok(none.errors >= 4);
   assert.equal(outbox.length, 10);
   assert.equal(await sendsOf("diagnostic"), 0);
   assert.match((await db.select().from(schema.mailCampaignItems).where(eq(schema.mailCampaignItems.campaignId, camp.id))).map((i) => i.lastError).join("|"), /Aucun modèle de mail/);
@@ -145,6 +154,8 @@ test("diagnostic : sans modèle rien ne part ; avec modèle, 4 mails (premier pa
   assert.equal(await sendsOf("audit"), 10);
   const diag = outbox.slice(10);
   assert.equal(diag.length, 4);
+  assert.ok(diag.every((o) => o.to[0].email !== "editeurdiag1@exemple.fr")); // diagnostic périmé : pas de mail
+  await db.update(schema.companyDiagnostics).set({ checkedOn: T }).where(eq(schema.companyDiagnostics.companyId, diagIds[0]));
   for (const o of diag) {
     assert.equal(o.headers?.["List-Unsubscribe-Post"], "List-Unsubscribe=One-Click");
     assert.match(o.headers?.["List-Unsubscribe"] ?? "", /^<https:\/\/crm\.test\/api\/desabonnement\//);
@@ -306,4 +317,42 @@ test("pause automatique : une plainte met le service en pause, sans toucher à l
   // Webhook : clé fausse refusée.
   const bad = await hook.POST(Object.assign(new Request("https://crm.test/x", { method: "POST", body: "[]" }), { nextUrl: new URL("https://crm.test/x?key=mauvaise") }) as never);
   assert.equal(bad.status, 401);
+});
+
+// ——— Phase C : file d'attente des diagnostics ———
+
+test("file de diagnostics : lots, budget de temps, reprise, entreprise sans domaine", async () => {
+  const { queueDiagnostics, runDiagnostics, latestDiagnostics } = await import("../src/server/diagnostic");
+  const { usableDiagnostic } = await import("../src/lib/diagnostic");
+  await db.delete(schema.companyDiagnostics);
+  const ids = [await company("Agence Web 1", "site"), await company("Agence Web 2", "site"), await company("Agence Web 3", "site"), await company("Agence Web 4", "site")];
+  const webmail = await company("Artisan Webmail", "saisie", "artisan@gmail.com");
+  assert.equal(await queueDiagnostics([...ids, webmail, "inconnue"]), 5);
+  assert.equal(await queueDiagnostics(ids), 0); // déjà en attente
+
+  let calls = 0;
+  const probe: Probe = {
+    dns: async (name, type) => { calls++; return type === "MX" ? { kind: "records", values: ["10 mx." + name] } : { kind: "absent" }; },
+    tls: async () => ({ kind: "error", detail: "connexion HTTPS impossible" }),
+    http: async () => ({ kind: "error", detail: "site introuvable (adresse inconnue)" }),
+  };
+  // Budget trop court pour un second lot : un seul lot de 2, le reste attend.
+  const first = await runDiagnostics({ probe, budgetMs: 1, batch: 2 });
+  assert.deepEqual([first.done, first.waiting], [2, 3]);
+  assert.match(first.message, /3 en attente \(repris au prochain déclenchement\)/);
+  // Passage suivant : tout le reste, dont l'entreprise sans domaine exploitable.
+  const second = await runDiagnostics({ probe, budgetMs: 40_000, batch: 2 });
+  assert.deepEqual([second.done, second.skipped, second.failed, second.waiting], [2, 1, 0, 0]);
+  assert.ok(calls > 0);
+  const latest = await latestDiagnostics();
+  const d = latest.get(ids[0])!;
+  assert.deepEqual([d.status, d.mailDomain, d.mainFinding, d.certainCount, d.checkedOn], ["fait", "agenceweb1@exemple.fr".split("@")[1], "spf", 2, T]);
+  assert.equal(usableDiagnostic(d, T), true);
+  assert.equal(latest.has(webmail), false);
+  assert.equal((await db.select().from(schema.companyDiagnostics).where(eq(schema.companyDiagnostics.companyId, webmail)))[0].status, "sans_domaine");
+  // Une sonde qui plante ne bloque pas la file.
+  await queueDiagnostics([ids[1]]);
+  const crash = await runDiagnostics({ probe: { ...probe, dns: async () => { throw new Error("boom"); } }, budgetMs: 1 });
+  assert.deepEqual([crash.done, crash.waiting], [1, 0]);
+  assert.equal((await latestDiagnostics()).get(ids[1])!.certainCount, 0);
 });

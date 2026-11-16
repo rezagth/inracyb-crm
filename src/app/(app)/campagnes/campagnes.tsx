@@ -9,6 +9,7 @@ import { useToast } from "@/components/mod/toast";
 import { OFFER_KIT, type OfferKey } from "@/lib/prospection";
 import { SERVICE_KEYS, SERVICE_LABEL, STEP_LABELS, type ServiceKey } from "@/lib/campaign";
 import { fd } from "@/lib/format";
+import { Diagnostics, type DiagProspect, type DiagRow } from "./diagnostics";
 
 type P = { id: string; name: string; sector: string; email: string; why: string | null };
 type Item = { id: string; company: string; step: number; due: string; status: string; reason: string; error: string };
@@ -20,7 +21,7 @@ type Diag = { open: boolean; limit: number; sent: number; stage: number; stages:
 
 const STATUS: Record<string, string> = { active: "En cours", pause: "En pause", terminee: "Terminée" };
 
-export function Campagnes({ prospects, offers, ready, urlOk, dailyLimit, sentToday, diagnostic, total, restDays, status, pauseRule, fromEmail, health, campaigns: allCampaigns }: { prospects: P[]; offers: OfferKey[]; ready: boolean; urlOk: boolean; dailyLimit: number; sentToday: number; diagnostic: Diag; total: { limit: number; sent: number }; restDays: number; status: Record<ServiceKey, Status>; pauseRule: { windowDays: number; minSends: number; maxBounceRate: number }; fromEmail: string; health: Health; campaigns: C[] }) {
+export function Campagnes({ prospects, offers, ready, urlOk, dailyLimit, sentToday, diagnostic, total, restDays, diag, status, pauseRule, fromEmail, health, campaigns: allCampaigns }: { prospects: P[]; offers: OfferKey[]; ready: boolean; urlOk: boolean; dailyLimit: number; sentToday: number; diagnostic: Diag; total: { limit: number; sent: number }; restDays: number; diag: { prospects: DiagProspect[]; rows: DiagRow[]; pending: number; freshDays: number }; status: Record<ServiceKey, Status>; pauseRule: { windowDays: number; minSends: number; maxBounceRate: number }; fromEmail: string; health: Health; campaigns: C[] }) {
   const router = useRouter();
   const toast = useToast();
   const [pending, start] = useTransition();
@@ -117,6 +118,8 @@ export function Campagnes({ prospects, offers, ready, urlOk, dailyLimit, sentTod
           </div>
         </Card>
       )}
+
+      {tab === "diagnostic" && <Diagnostics prospects={diag.prospects} rows={diag.rows} pending={diag.pending} freshDays={diag.freshDays} />}
 
       {tab === "audit" && <Card title="Nouvelle campagne" actions={<span className="text-xs text-subtle-fg">Envoi depuis {fromEmail} · {sentToday}/{dailyLimit} mails aujourd&apos;hui</span>}>
         <div className="flex flex-col gap-4 p-5">

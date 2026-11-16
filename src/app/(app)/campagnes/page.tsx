@@ -7,6 +7,9 @@ import { appUrl, checkServicePauses, crossHistories, getDailyState, optoutSet, r
 import { PAUSE_RULE, DIAGNOSTIC_OPEN, entryExclusion, ENTRY_EXCLUSION_LABEL, RAMP_EVERY, serviceOf } from "@/lib/campaign";
 import { BOUNCE_REASONS, REASON } from "@/lib/brevo-events";
 import { today } from "@/lib/format";
+import { siteFromNotes } from "@/lib/contact-extract";
+import { DIAGNOSTIC_FRESH_DAYS, parseChecks, targetsOf, usableDiagnostic } from "@/lib/diagnostic";
+import { latestDiagnostics } from "@/server/diagnostic";
 import { PageHeader } from "@/components/ui";
 import { Campagnes } from "./campagnes";
 
@@ -31,6 +34,21 @@ export default async function CampagnesPage() {
     return { id: p.id, name: p.name, sector: p.sector, email: p.email, why: ex ? ENTRY_EXCLUSION_LABEL[ex] : null };
   });
   const state = await getDailyState(t);
+  // Onglet Diagnostic : entreprises dont le domaine est exploitable, file d'attente et derniers résultats.
+  const notes = new Map((await db.select({ id: schema.companies.id, notes: schema.companies.notes }).from(schema.companies)).map((c) => [c.id, c.notes]));
+  const all = await prospectList();
+  const diagProspects = all.flatMap((p) => {
+    if (p.stage === "perdu") return [];
+    const tg = targetsOf(p.email, siteFromNotes(notes.get(p.id) ?? ""));
+    const target = [...new Set([tg.mailDomain, tg.webHost].filter(Boolean))].join(" · ");
+    return target ? [{ id: p.id, name: p.name, sector: p.sector, target }] : [];
+  });
+  const names = new Map(all.map((p) => [p.id, p.name]));
+  const diagRows = [...(await latestDiagnostics()).values()].map((d) => {
+    const main = parseChecks(d.findings).find((c) => c.id === d.mainFinding);
+    return { id: d.id, company: names.get(d.companyId) ?? "", target: [...new Set([d.mailDomain, d.webHost].filter(Boolean))].join(" · "), checkedOn: d.checkedOn, main: main?.label ?? "", mainWording: main?.wording ?? "", certainCount: d.certainCount, usable: usableDiagnostic(d, t) };
+  });
+  const diagPending = (await db.select({ id: schema.companyDiagnostics.id }).from(schema.companyDiagnostics).where(eq(schema.companyDiagnostics.status, "a_faire"))).length;
   const status = await checkServicePauses();
   const statusOf = (k: "audit" | "diagnostic") => ({ paused: status[k].paused, reason: status[k].reason, ...status[k].health });
   const sends = await db.select({ companyId: schema.mailSends.companyId, offer: schema.mailSends.offer }).from(schema.mailSends);
@@ -66,6 +84,7 @@ export default async function CampagnesPage() {
         diagnostic={{ open: DIAGNOSTIC_OPEN, limit: state.diagnostic.limit, sent: state.diagnostic.sent, stage: state.diagnostic.ramp.stage, stages: state.diagnostic.ramp.stages, target: state.diagnostic.ramp.target, every: RAMP_EVERY, firstSendOn: state.diagnostic.firstSendOn }}
         total={{ limit: state.total.limit, sent: state.total.sent }}
         restDays={rest}
+        diag={{ prospects: diagProspects, rows: diagRows, pending: diagPending, freshDays: DIAGNOSTIC_FRESH_DAYS }}
         status={{ audit: statusOf("audit"), diagnostic: statusOf("diagnostic") }}
         pauseRule={{ windowDays: PAUSE_RULE.windowDays, minSends: PAUSE_RULE.minSends, maxBounceRate: PAUSE_RULE.maxBounceRate }}
         fromEmail={brevoConfig().fromEmail}

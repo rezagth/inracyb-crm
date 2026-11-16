@@ -29,6 +29,13 @@
       "when": 1794844932990,
       "tag": "0003_hot_the_watchers",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1794845317067,
+      "tag": "0004_tired_joshua_kane",
+      "breakpoints": true
     }
   ]
 }

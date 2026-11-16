@@ -180,15 +180,6 @@ export function dailyState(input: { today: string; sentByOffer: Record<string, n
   return { audit: mk(input.auditLimit, sent.audit), diagnostic: { ...mk(ramp.limit, sent.diagnostic), ramp, firstSendOn: input.firstDiagnosticSendOn }, total: mk(totalLimit, sent.audit + sent.diagnostic) };
 }
 
-/**
- * Les mails à envoyer aujourd'hui, tous services confondus : chaque service dans la limite de son plafond restant,
- * l'ensemble dans la limite du total restant, les plus en retard d'abord.
- */
-export function pickDueByService<T extends { nextDue: string; service: ServiceKey }>(items: T[], today: string, state: DailyState): T[] {
-  const picked = SERVICE_KEYS.flatMap((s) => pickDue(items.filter((i) => i.service === s), today, state[s].remaining));
-  return pickDue(picked, today, state.total.remaining);
-}
-
 // ——— Passage d'un service à l'autre : une seule séquence à la fois, puis un délai de repos ———
 
 export const REPLIED_REASON = "A répondu";
@@ -196,13 +187,14 @@ export const REPLIED_REASON = "A répondu";
 /** Ce qu'une entreprise a déjà vécu dans l'autre service. */
 export type CrossHistory = { /** dernier mail reçu au titre de l'autre service */ lastSend: string | null; /** a répondu à une séquence de l'autre service */ replied: boolean; /** a déjà reçu ce service-ci */ sameServiceSent: boolean };
 
-export type EntryExclusion = Exclusion | "a-repondu" | "repos" | "deja-diagnostique" | "origine";
+export type EntryExclusion = Exclusion | "a-repondu" | "repos" | "deja-diagnostique" | "origine" | "sans-constat";
 export const ENTRY_EXCLUSION_LABEL: Record<EntryExclusion, string> = {
   ...EXCLUSION_LABEL,
   "a-repondu": "a déjà répondu à une autre séquence",
   repos: "délai de repos après la séquence précédente",
   "deja-diagnostique": "a déjà reçu le diagnostic",
   origine: "origine de l'adresse inconnue ou non vérifiée",
+  "sans-constat": "pas de constat certain et récent (diagnostic à faire ou à refaire)",
 };
 
 /** Reconstitue l'historique d'une entreprise vu depuis le service visé, à partir des envois et des séquences arrêtées sur réponse. */

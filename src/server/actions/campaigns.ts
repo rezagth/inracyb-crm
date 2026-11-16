@@ -6,9 +6,11 @@ import { z } from "zod";
 import { db, schema } from "@/db";
 import { requireUser } from "@/lib/auth";
 import { CAMPAIGN_OFFERS, DIAGNOSTIC_OPEN, REPLIED_REASON, entryExclusion, ENTRY_EXCLUSION_LABEL, serviceOf, type EntryExclusion } from "@/lib/campaign";
+import { usableDiagnostic } from "@/lib/diagnostic";
 import { today } from "@/lib/format";
 import { prospectList } from "../queries";
 import { logEvent } from "../core";
+import { latestDiagnostics, queueDiagnostics, runDiagnostics } from "../diagnostic";
 import { crossHistories, optoutSet, recordOptout, recordRun, restDays, resumeService, runCampaigns } from "../campaigns";
 
 type R = { ok: true; message: string } | { ok: false; error: string };
@@ -39,10 +41,12 @@ export async function createCampaignAction(name: string, offer: string, companyI
   const history = await crossHistories(target);
   const t = today();
   const rest = restDays();
+  const diagnostics = target === "diagnostic" ? await latestDiagnostics() : new Map();
   const eligible: string[] = [];
   const excluded: Partial<Record<EntryExclusion, number>> = {};
   for (const p of (await prospectList()).filter((p) => wanted.has(p.id))) {
-    const ex = entryExclusion({ id: p.id, name: p.name, stage: p.stage, email: p.email, emailSource: p.emailSource }, optouts, inCampaign, target, history.get(p.id), t, rest);
+    // Barrière de qualité du diagnostic : au moins un constat certain, mesuré récemment.
+    const ex = entryExclusion({ id: p.id, name: p.name, stage: p.stage, email: p.email, emailSource: p.emailSource }, optouts, inCampaign, target, history.get(p.id), t, rest) ?? (target === "diagnostic" && !usableDiagnostic(diagnostics.get(p.id), t) ? "sans-constat" : null);
     if (ex) excluded[ex] = (excluded[ex] ?? 0) + 1;
     else eligible.push(p.id);
   }
@@ -141,4 +145,15 @@ export async function resumeServiceAction(service: string): Promise<R> {
   await resumeService(s.data);
   revalidatePath("/campagnes");
   return { ok: true, message: "Service repris : les envois repartent au prochain déclenchement." };
+}
+
+/** Met des entreprises en file d'attente de diagnostic et traite tout de suite ce qui tient dans le temps imparti ; le reste part au prochain passage automatique. */
+export async function queueDiagnosticsAction(companyIds: string[]): Promise<R> {
+  await requireUser();
+  const ids = z.array(z.string().min(1).max(64)).min(1).max(200).safeParse(companyIds);
+  if (!ids.success) return { ok: false, error: "Sélectionne entre 1 et 200 entreprises." };
+  const added = await queueDiagnostics(ids.data);
+  const r = await runDiagnostics({ budgetMs: 40_000 });
+  revalidatePath("/campagnes");
+  return { ok: true, message: `${added} entreprise(s) ajoutée(s) à la file. ${r.message}` };
 }

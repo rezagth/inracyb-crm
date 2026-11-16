@@ -24,11 +24,27 @@ async function assertPublic(hostname: string) {
   if (!addrs.length || addrs.some((a) => isPrivateIp(a.address))) throw new Error("adresse non publique");
 }
 
+/** Adresse IP publique d'un hôte (toutes ses adresses doivent être publiques), pour une connexion directe contrôlée. */
+export async function publicAddress(hostname: string): Promise<string> {
+  if (isIP(hostname)) {
+    if (isPrivateIp(hostname)) throw new Error("adresse non publique");
+    return hostname;
+  }
+  const addrs = await lookup(hostname, { all: true });
+  if (!addrs.length || addrs.some((a) => isPrivateIp(a.address))) throw new Error("adresse non publique");
+  return (addrs.find((a) => a.family === 4) ?? addrs[0]).address;
+}
+
 const UA = "Mozilla/5.0 (compatible; InfraCybCRM/1.0; +https://infracyb.fr)";
 const MAX_BYTES = 600_000;
 
-/** Télécharge une page HTML publique : http(s) seulement, ports 80/443, redirections revérifiées, taille et durée bornées. */
-export async function fetchHtml(startUrl: string, deadline: number): Promise<{ html: string; url: string } | { error: string }> {
+export type PublicResponse = { status: number; url: string; headers: Record<string, string>; contentType: string; /** vide si la réponse n'est pas un succès (2xx) */ body: string; empty: boolean };
+
+/**
+ * Récupère une ressource publique : http(s) seulement, ports 80/443, redirections revérifiées une à une, taille et durée bornées.
+ * Renvoie la réponse finale quel que soit son code (le corps n'est lu que pour un succès).
+ */
+export async function fetchPublic(startUrl: string, deadline: number, accept = "text/html,application/xhtml+xml"): Promise<PublicResponse | { error: string }> {
   let url = startUrl;
   for (let hop = 0; hop < 4; hop++) {
     const left = deadline - Date.now();
@@ -37,17 +53,22 @@ export async function fetchHtml(startUrl: string, deadline: number): Promise<{ h
       const u = new URL(url);
       if (!/^https?:$/.test(u.protocol) || (u.port && u.port !== "80" && u.port !== "443") || u.username || u.password) return { error: "adresse non prise en charge" };
       await assertPublic(u.hostname);
-      const res = await fetch(u, { redirect: "manual", headers: { "user-agent": UA, accept: "text/html,application/xhtml+xml", "accept-language": "fr-FR,fr;q=0.9" }, signal: AbortSignal.timeout(Math.min(6000, left)), cache: "no-store" });
+      const res = await fetch(u, { redirect: "manual", headers: { "user-agent": UA, accept, "accept-language": "fr-FR,fr;q=0.9" }, signal: AbortSignal.timeout(Math.min(6000, left)), cache: "no-store" });
       if (res.status >= 300 && res.status < 400) {
         const loc = res.headers.get("location");
         if (!loc) return { error: `redirection invalide (HTTP ${res.status})` };
         url = new URL(loc, u).href;
         continue;
       }
-      if (!res.ok) return { error: `le site refuse l'accès (HTTP ${res.status})` };
-      if (!/html|xml|text\/plain/i.test(res.headers.get("content-type") ?? "")) return { error: "page non lisible" };
+      const headers: Record<string, string> = {};
+      res.headers.forEach((v, k) => { headers[k.toLowerCase()] = v.slice(0, 2000); });
+      const base = { status: res.status, url: u.href, headers, contentType: res.headers.get("content-type") ?? "" };
+      if (!res.ok) {
+        await res.body?.cancel().catch(() => {});
+        return { ...base, body: "", empty: true };
+      }
       const reader = res.body?.getReader();
-      if (!reader) return { error: "page vide" };
+      if (!reader) return { ...base, body: "", empty: true };
       const chunks: Uint8Array[] = [];
       let size = 0;
       while (size < MAX_BYTES) {
@@ -57,11 +78,21 @@ export async function fetchHtml(startUrl: string, deadline: number): Promise<{ h
         size += value.length;
       }
       await reader.cancel().catch(() => {});
-      return { html: Buffer.concat(chunks).toString("utf8"), url: u.href };
+      return { ...base, body: Buffer.concat(chunks).toString("utf8"), empty: false };
     } catch (e) {
       const code = (e as { cause?: { code?: string } })?.cause?.code ?? (e as Error)?.name ?? "";
       return { error: code === "ENOTFOUND" || code === "EAI_AGAIN" ? "site introuvable (adresse inconnue)" : code === "TimeoutError" || code === "AbortError" ? "le site met trop de temps à répondre" : `connexion impossible${code ? ` (${code})` : ""}` };
     }
   }
   return { error: "trop de redirections" };
+}
+
+/** Télécharge une page HTML publique (mêmes protections que fetchPublic). */
+export async function fetchHtml(startUrl: string, deadline: number): Promise<{ html: string; url: string } | { error: string }> {
+  const r = await fetchPublic(startUrl, deadline);
+  if ("error" in r) return r;
+  if (r.status < 200 || r.status > 299) return { error: `le site refuse l'accès (HTTP ${r.status})` };
+  if (!/html|xml|text\/plain/i.test(r.contentType)) return { error: "page non lisible" };
+  if (r.empty) return { error: "page vide" };
+  return { html: r.body, url: r.url };
 }

@@ -13,7 +13,7 @@ import {
   PAUSE_RULE,
   pauseReason,
   parseLimit,
-  pickDueByService,
+  pickDue,
   REPLIED_REASON,
   REST_DAYS_DEFAULT,
   runFailed,
@@ -28,6 +28,7 @@ import {
   type ServiceHealth,
   type ServiceKey,
 } from "@/lib/campaign";
+import { usableDiagnostic } from "@/lib/diagnostic";
 import { today } from "@/lib/format";
 import { OFFER_KIT, scripts, type OfferKey, type Profile, type Prospect } from "@/lib/prospection";
 import { brevoConfig, sendBrevoMail } from "./brevo";
@@ -215,7 +216,9 @@ export async function runCampaigns(opts: { campaignId?: string; budgetMs?: numbe
     return { ok: true, sent: 0, stopped: 0, errors: 0, waiting: dueAll, message: `Plafond du jour atteint (${caps}). ${dueAll} mail(s) en attente : ils partiront demain${onlyAudit ? ", ou monte MAIL_DAILY_LIMIT" : ""}.${pausedNote ? ` ${pausedNote}.` : ""}` };
   }
 
-  const due = pickDueByService(rows.map((r) => ({ ...r, nextDue: r.item.nextDue, service: serviceOf(r.campaign.offer) })), t, state);
+  // Tous les mails dus, les plus en retard d'abord. Les plafonds sont appliqués dans la boucle, à chaque envoi réel :
+  // une entrée bloquée (adresse à corriger, diagnostic à refaire) ne consomme donc jamais une place du jour.
+  const due = pickDue(dueRows.map((r) => ({ ...r, nextDue: r.item.nextDue, service: serviceOf(r.campaign.offer) })), t, dueRows.length);
   const optouts = await optoutSet();
   const profile = await getProfile();
   let sent = 0, stopped = 0, errors = 0, consecutive = 0;
@@ -246,6 +249,15 @@ export async function runCampaigns(opts: { campaignId?: string; budgetMs?: numbe
       await db.update(schema.mailCampaignItems).set({ lastError: blocked }).where(eq(schema.mailCampaignItems.id, item.id));
       errors++;
       continue;
+    }
+    // Diagnostic : jamais de mail sans constat certain et récent (un constat périmé peut être devenu faux).
+    if (service === "diagnostic") {
+      const d = (await db.select().from(schema.companyDiagnostics).where(and(eq(schema.companyDiagnostics.companyId, c.id), eq(schema.companyDiagnostics.status, "fait"))).orderBy(desc(schema.companyDiagnostics.createdAt)).limit(1))[0];
+      if (!usableDiagnostic(d, t)) {
+        await db.update(schema.mailCampaignItems).set({ lastError: "Pas de constat certain et récent : relance le diagnostic de cette entreprise." }).where(eq(schema.mailCampaignItems.id, item.id));
+        errors++;
+        continue;
+      }
     }
     const offer = campaign.offer as CampaignOffer;
     const step = item.nextStep;

@@ -57,7 +57,7 @@ test("pied de mail et en-têtes Brevo", () => {
 });
 
 // ——— Deux services : plafonds, paliers, exclusion croisée, délai de repos ———
-import { businessDaysSince, crossHistory, dailyState, entryExclusion, isBusinessDay, isFrenchHoliday, parseLimit, pickDueByService, rampLimit, serviceOf } from "../src/lib/campaign";
+import { businessDaysSince, crossHistory, dailyState, entryExclusion, isBusinessDay, isFrenchHoliday, parseLimit, rampLimit, serviceOf } from "../src/lib/campaign";
 
 test("service d'un envoi : seul le diagnostic sort du service audit", () => {
   assert.deepEqual(["audit", "ciso", "ia", "diagnostic", "inconnu"].map(serviceOf), ["audit", "audit", "audit", "diagnostic", "audit"]);
@@ -112,23 +112,6 @@ test("état du jour : plafond par service et total, sans aucune variable d'envir
   assert.equal(over.audit.remaining, 0);
   assert.equal(over.total.limit, 300);
   assert.equal(over.total.remaining, 0);
-});
-
-test("choix des mails du jour : chaque service dans son plafond, l'ensemble dans le total", () => {
-  const mk = (id: string, service: "audit" | "diagnostic", nextDue: string) => ({ id, service, nextDue });
-  const items = [mk("a1", "audit", "2026-11-10"), mk("a2", "audit", "2026-11-12"), mk("a3", "audit", "2026-11-13"), mk("d1", "diagnostic", "2026-11-09"), mk("d2", "diagnostic", "2026-11-11"), mk("d3", "diagnostic", "2026-11-30")];
-  const state = (auditSent: number, diagSent: number, totalLimit?: number) => {
-    const s = dailyState({ today: "2026-11-16", sentByOffer: { audit: auditSent, diagnostic: diagSent }, firstDiagnosticSendOn: null, auditLimit: 10, diagnosticTarget: 10 });
-    return totalLimit === undefined ? s : { ...s, total: { limit: totalLimit, sent: s.total.sent, remaining: Math.max(0, totalLimit - s.total.sent) } };
-  };
-  const ids = (s: ReturnType<typeof state>) => pickDueByService(items, "2026-11-16", s).map((i) => i.id);
-  assert.deepEqual(ids(state(0, 0)), ["d1", "a1", "d2", "a2", "a3"]); // d3 n'est pas dû
-  assert.deepEqual(ids(state(8, 0)), ["d1", "a1", "d2", "a2"]); // audit : 2 restants
-  assert.deepEqual(ids(state(10, 0)), ["d1", "d2"]); // audit plein : le diagnostic part quand même
-  assert.deepEqual(ids(state(0, 3)), ["d1", "a1", "a2", "a3"]); // diagnostic : palier 4, 1 restant
-  assert.deepEqual(ids(state(0, 4)), ["a1", "a2", "a3"]); // diagnostic plein : l'audit part quand même
-  assert.deepEqual(ids(state(0, 0, 3)), ["d1", "a1", "d2"]); // total : les plus en retard d'abord
-  assert.deepEqual(ids(state(2, 1, 3)), []); // total atteint
 });
 
 test("passage d'un service à l'autre : réponse, délai de repos, diagnostic reçu une seule fois", () => {

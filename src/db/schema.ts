@@ -337,6 +337,29 @@ export const mailEvents = pgTable(
   (t) => [index("mail_events_email_idx").on(t.email), index("mail_events_type_idx").on(t.type, t.createdAt)],
 );
 
+/**
+ * Diagnostic passif du domaine d'une entreprise (données publiques). status : a_faire | fait | sans_domaine | erreur.
+ * findings : constats structurés en JSON (statut, certitude, preuve, formulation prudente). Aucun score.
+ */
+export const companyDiagnostics = pgTable(
+  "company_diagnostics",
+  {
+    id: id(),
+    companyId: text("company_id").notNull().references(() => companies.id, { onDelete: "cascade" }),
+    status: text("status").notNull().default("a_faire"),
+    mailDomain: text("mail_domain").notNull().default(""),
+    webHost: text("web_host").notNull().default(""),
+    findings: text("findings").notNull().default("[]"),
+    /** id du constat principal ("" s'il n'y a aucun constat certain) */
+    mainFinding: text("main_finding").notNull().default(""),
+    certainCount: integer("certain_count").notNull().default(0),
+    rulesVersion: text("rules_version").notNull().default(""),
+    checkedOn: text("checked_on").notNull().default(""),
+    createdAt: createdAt(),
+  },
+  (t) => [index("company_diagnostics_company_idx").on(t.companyId, t.createdAt), index("company_diagnostics_status_idx").on(t.status)],
+);
+
 /** État d'un service d'envoi (audit | diagnostic) : en pause automatique ou non, pourquoi, et depuis quand (la reprise remet le compteur de santé à zéro). */
 export const mailServiceState = pgTable("mail_service_state", {
   service: text("service").primaryKey(),

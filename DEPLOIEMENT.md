@@ -70,3 +70,11 @@ Prérequis côté Brevo : domaine infracyb.fr authentifié, expéditeur contact@
 - **Réponse reçue** : bouton sur la page Campagnes et sur la fiche de l'entreprise. Il arrête la séquence et crée une tâche prioritaire.
 - **Origine des adresses** : chaque adresse garde son origine (saisie à la main, publiée sur le site, historique). Sans origine connue, aucun envoi. Les adresses historiques ne sont admises que pour le service Audit.
 - Migration : `npm run db:migrate`, ou la section « Phase B » de `drizzle-manuel-diagnostic.sql`, **avant** de déployer le code (le CRM lit la colonne `contacts.email_source`).
+
+### Moteur de diagnostic (service Diagnostic)
+
+- Mesures passives uniquement, sur des données publiques : SPF, DMARC, MX, MTA-STS, DKIM (sélecteurs courants, « non détecté » et jamais « absent »), certificat HTTPS, en-têtes de la page d'accueil, `security.txt`, domaines proches (résolution DNS seulement). Aucun balayage de ports.
+- Le DNS est interrogé en HTTPS auprès de deux résolveurs publics (Cloudflare et Google) : une absence n'est retenue que s'ils sont d'accord. Les noms de domaine des prospects leur sont donc transmis, comme pour toute requête DNS.
+- File d'attente traitée par lots dans un budget de temps ; le reste est repris par la tâche planifiée `/api/cron/diagnostics` (jours ouvrés, 6 h 30 UTC, même `CRON_SECRET`).
+- Un prospect n'entre dans la séquence que s'il a au moins un constat certain, mesuré depuis 14 jours au plus. Rapport d'une page : lien « Rapport » de l'onglet Diagnostic (Imprimer > Enregistrer en PDF).
+- Migration : `npm run db:migrate`, ou la section « Phase C » de `drizzle-manuel-diagnostic.sql`, avant de déployer.
