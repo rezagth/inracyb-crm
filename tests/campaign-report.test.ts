@@ -1,7 +1,7 @@
 /** Bilan par service et segment : cohortes, taux, et refus de conclure sur un petit échantillon. */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildReport, compareRates, MIN_SAMPLE, rate, verdicts, wilson, type ProspectRecord } from "../src/lib/campaign-report";
+import { buildReport, compareRates, onePerCompany, MIN_SAMPLE, rate, verdicts, wilson, type ProspectRecord } from "../src/lib/campaign-report";
 
 const T = "2026-12-20";
 const rec = (o: Partial<ProspectRecord>): ProspectRecord => ({ service: "diagnostic", segment: "editeurs", firstSend: "2026-11-16", mails: 4, delivered: true, bounced: false, complained: false, optedOut: false, replied: false, meetings: [], signed: [], ...o });
@@ -24,6 +24,27 @@ test("tableau : une ligne par service et segment, compteurs par entreprise", () 
   const ed = rows[3];
   assert.deepEqual([ed.contacted, ed.mails, ed.delivered, ed.bounced, ed.replied, ed.meetings, ed.signed], [2, 5, 1, 1, 1, 1, 1]);
   assert.deepEqual([rows[2].optedOut, rows[0].complained], [1, 1]);
+});
+
+test("entreprise dans deux campagnes du même service : comptée une seule fois, ses mails aussi", () => {
+  // Cas réel : arrêtée « A répondu » dans une campagne d'audit avant tout envoi, puis reprise dans une autre (2 mails).
+  const merged = onePerCompany([
+    { companyId: "a", ...rec({ service: "audit", segment: "cabinets", firstSend: "2026-11-11", mails: 2, replied: true, delivered: null }) },
+    { companyId: "a", ...rec({ service: "audit", segment: "cabinets", firstSend: "2026-11-11", mails: 2, delivered: null }) },
+    { companyId: "a", ...rec({ service: "diagnostic", segment: "cabinets", firstSend: "2026-12-14", mails: 1 }) }, // autre service : compté à part
+    { companyId: "b", ...rec({ service: "audit", segment: "cabinets", firstSend: "2026-11-12", mails: 3, delivered: null }) },
+  ]);
+  assert.equal(merged.length, 3);
+  const rows = buildReport(merged, T, null);
+  const audit = rows.find((r) => r.service === "audit")!;
+  assert.deepEqual([audit.contacted, audit.mails, audit.replied, audit.delivered], [2, 5, 1, null]);
+  assert.deepEqual([rows.find((r) => r.service === "diagnostic")!.contacted], [1]);
+  // Premier envoi le plus ancien, accusé de remise reçu dans l'une ou l'autre.
+  const m = onePerCompany([
+    { companyId: "c", ...rec({ firstSend: null, mails: 0, delivered: false, bounced: false }) },
+    { companyId: "c", ...rec({ firstSend: "2026-11-20", mails: 1, delivered: true, bounced: true, meetings: ["2026-11-25"] }) },
+  ]);
+  assert.deepEqual([m.length, m[0].firstSend, m[0].mails, m[0].delivered, m[0].bounced, m[0].meetings], [1, "2026-11-20", 1, true, true, ["2026-11-25"]]);
 });
 
 test("cohortes J+14 et J+30 : seules les entreprises assez anciennes, seuls les rendez-vous et devis dans le délai", () => {

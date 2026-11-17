@@ -8,7 +8,7 @@
  */
 import { fd } from "./format";
 
-export const RULES_VERSION = "2026-11-16.2";
+export const RULES_VERSION = "2026-11-17.1";
 
 /** Réponse DNS : enregistrements trouvés, absence confirmée, ou mesure impossible (erreur, délai, résolveurs en désaccord). */
 export type Dns = { kind: "records"; values: string[] } | { kind: "absent" } | { kind: "error"; detail: string };
@@ -71,18 +71,27 @@ export const isDomain = (d: string): boolean => DOMAIN_RE.test(d);
 /** Messageries grand public : le domaine n'appartient pas à l'entreprise, on ne le diagnostique pas. */
 const WEBMAIL = new Set(["gmail.com", "googlemail.com", "outlook.com", "outlook.fr", "hotmail.com", "hotmail.fr", "live.com", "live.fr", "msn.com", "yahoo.com", "yahoo.fr", "ymail.com", "icloud.com", "me.com", "mac.com", "orange.fr", "wanadoo.fr", "free.fr", "sfr.fr", "neuf.fr", "laposte.net", "bbox.fr", "numericable.fr", "aliceadsl.fr", "club-internet.fr", "gmx.fr", "gmx.com", "proton.me", "protonmail.com", "aol.com", "aol.fr"]);
 
+/**
+ * Plateformes partagées par toute une profession : chaque cabinet y reçoit une adresse ou une page, mais le domaine
+ * (et ses sous-domaines) appartient à la plateforme. Un constat dessus ne concerne pas le prospect : on ne le diagnostique pas.
+ */
+export const SHARED_PLATFORMS = ["notaires.fr", "doctolib.fr"] as const;
+const isShared = (d: string): boolean => SHARED_PLATFORMS.some((p) => d === p || d.endsWith("." + p));
+/** Le domaine peut-il être celui de l'entreprise ? Ni messagerie grand public, ni plateforme partagée. */
+const ownable = (d: string): boolean => isDomain(d) && !WEBMAIL.has(d.replace(/^www\./, "")) && !isShared(d);
+
 /** Domaines à examiner pour une entreprise : celui de sa messagerie (sauf messagerie grand public) et celui de son site. */
 export function targetsOf(email: string, siteUrl: string): { mailDomain: string; webHost: string } {
   const e = email.trim().toLowerCase();
   const d = e.includes("@") ? e.slice(e.lastIndexOf("@") + 1) : "";
-  const mailDomain = isDomain(d) && !WEBMAIL.has(d) ? d : "";
+  const mailDomain = ownable(d) ? d : "";
   let host = "";
   try {
     host = siteUrl ? new URL(/^https?:\/\//i.test(siteUrl) ? siteUrl : "https://" + siteUrl).hostname.toLowerCase() : "";
   } catch {
     host = "";
   }
-  const webHost = isDomain(host) && !WEBMAIL.has(host.replace(/^www\./, "")) ? host : mailDomain;
+  const webHost = ownable(host) ? host : mailDomain;
   return { mailDomain: mailDomain || (webHost ? webHost.replace(/^www\./, "") : ""), webHost };
 }
 

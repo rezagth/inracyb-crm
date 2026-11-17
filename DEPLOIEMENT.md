@@ -55,11 +55,19 @@ Variables à ajouter dans `.env` en local **et** dans Vercel (Settings > Environ
 
 ### Deux services : Audit et Diagnostic
 
+**Migrations de la base en service : uniquement `drizzle-manuel-diagnostic.sql`, jamais `npm run db:migrate`.** La base de production n'a enregistré que la première migration Drizzle ; les tables suivantes ont été créées par les fichiers `drizzle-manuel-*.sql`. `npm run db:migrate` rejouerait la migration 0001 et échouerait sur des tables qui existent déjà. Le fichier manuel est rejouable en entier (sections A à F), sans danger :
+
+```bash
+psql "$PROD_URL" -X -v ON_ERROR_STOP=1 -f drizzle-manuel-diagnostic.sql
+```
+
+Avant : une branche Neon de la production, et un export avec un `pg_dump` de version égale ou supérieure à celle du serveur (PostgreSQL 18 ; `brew install libpq`, puis `/opt/homebrew/opt/libpq/bin/pg_dump`).
+
 Les plafonds sont dans le code (`src/lib/campaign.ts`) : aucune variable n'est à créer.
 
 - Audit : 10 par jour. Diagnostic : 10 par jour, atteint par paliers (4, 6, 8, 10 ; un palier tous les 2 jours ouvrés depuis le premier envoi réel). Total : 20.
 - Facultatif : `MAIL_DAILY_LIMIT_DIAGNOSTIC` (plafond visé du diagnostic), `CAMPAIGN_REST_DAYS` (repos avant de passer d'un service à l'autre, 30 jours par défaut).
-- Une entreprise n'a qu'une séquence en cours à la fois : index unique `mail_campaign_items_active_uq` (`npm run db:migrate`, ou `drizzle-manuel-diagnostic.sql` dans Neon, après le contrôle indiqué en tête du fichier).
+- Une entreprise n'a qu'une séquence en cours à la fois : index unique `mail_campaign_items_active_uq` (`drizzle-manuel-diagnostic.sql`, après le contrôle indiqué en tête du fichier).
 - Le déclenchement automatique n'envoie rien les jours fériés ; les mails dus partent au jour ouvré suivant.
 
 Prérequis côté Brevo : domaine infracyb.fr authentifié, expéditeur contact@infracyb.fr validé, téléphone vérifié.
@@ -69,7 +77,7 @@ Prérequis côté Brevo : domaine infracyb.fr authentifié, expéditeur contact@
 - **Pause automatique** : un service s'arrête à la première plainte pour spam, ou au-delà de 2 % de rebonds sur 30 jours (au moins 30 envois et 2 rebonds). Une tâche prioritaire est créée et un bandeau s'affiche sur la page Campagnes ; la reprise est manuelle (bouton « Reprendre le service »). Les événements Brevo reçus avant cette version ne sont pas comptés.
 - **Réponse reçue** : bouton sur la page Campagnes et sur la fiche de l'entreprise. Il arrête la séquence et crée une tâche prioritaire.
 - **Origine des adresses** : chaque adresse garde son origine (saisie à la main, publiée sur le site, historique). Sans origine connue, aucun envoi. Les adresses historiques ne sont admises que pour le service Audit.
-- Migration : `npm run db:migrate`, ou la section « Phase B » de `drizzle-manuel-diagnostic.sql`, **avant** de déployer le code (le CRM lit la colonne `contacts.email_source`).
+- Migration : section « Phase B » de `drizzle-manuel-diagnostic.sql`, **avant** de déployer le code (le CRM lit la colonne `contacts.email_source`).
 
 ### Moteur de diagnostic (service Diagnostic)
 
@@ -77,7 +85,7 @@ Prérequis côté Brevo : domaine infracyb.fr authentifié, expéditeur contact@
 - Le DNS est interrogé en HTTPS auprès de deux résolveurs publics (Cloudflare et Google) : une absence n'est retenue que s'ils sont d'accord. Les noms de domaine des prospects leur sont donc transmis, comme pour toute requête DNS.
 - File d'attente traitée par lots dans un budget de temps ; le reste est repris par la tâche planifiée `/api/cron/diagnostics` (jours ouvrés, 6 h 30 UTC, même `CRON_SECRET`).
 - Un prospect n'entre dans la séquence que s'il a au moins un constat certain, mesuré depuis 14 jours au plus. Rapport d'une page : lien « Rapport » de l'onglet Diagnostic (Imprimer > Enregistrer en PDF).
-- Migration : `npm run db:migrate`, ou la section « Phase C » de `drizzle-manuel-diagnostic.sql`, avant de déployer.
+- Migration : section « Phase C » de `drizzle-manuel-diagnostic.sql`, avant de déployer.
 
 ### Séquence et textes du service Diagnostic
 
@@ -86,7 +94,7 @@ Prérequis côté Brevo : domaine infracyb.fr authentifié, expéditeur contact@
 - Accroches possibles : SPF absent, en double, en `+all` ; DMARC absent ou en `p=none` ; certificat expiré ou expirant sous 14 jours. HSTS n'est qu'un constat secondaire (J+3) : seul, il n'ouvre pas la campagne.
 - Avant J0 et J+3, le domaine est mesuré de nouveau. Constat corrigé : la séquence s'arrête. Mesure impossible ce jour-là : rien ne part, nouvel essai au passage suivant.
 - Un champ obligatoire vide (prénom, entreprise, domaine, date du certificat, nom dans Paramètres, signature) : le mail ne part pas et l'erreur s'affiche sur la ligne de la campagne. Seule exception : une adresse générique publiée sur le site, sans dirigeant connu ; le mail commence alors par « Bonjour, ».
-- Migration : section « Phase D » de `drizzle-manuel-diagnostic.sql`, ou `npm run db:migrate`, avant de déployer.
+- Migration : section « Phase D » de `drizzle-manuel-diagnostic.sql`, avant de déployer.
 
 ### Bilan par service et par segment
 
@@ -102,4 +110,4 @@ Prérequis côté Brevo : domaine infracyb.fr authentifié, expéditeur contact@
 - Étapes : recherche dans l'Annuaire des Entreprises par segment (codes NAF, tailles, départements), import (30 par jour et par segment par défaut), site et téléphone par Google Places si `GOOGLE_PLACES_API_KEY` est configurée (30 requêtes par jour par défaut), adresse **seulement si elle est publiée sur le site** (générique en priorité, origine « site »), diagnostic, inscription dans la campagne permanente du service et du segment.
 - Une entreprise n'est inscrite que si elle remplit toutes les conditions d'entrée habituelles, et seulement s'il reste de la place : les mails déjà dus plus ceux des nouvelles inscriptions doivent tenir dans le plafond quotidien sur la durée d'une séquence.
 - Sans Google Places, seules les entreprises dont le site est déjà noté sur la fiche peuvent être complétées : les autres sont écartées avec ce motif.
-- Migration : section « Phase F » de `drizzle-manuel-diagnostic.sql`, ou `npm run db:migrate`, avant de déployer.
+- Migration : section « Phase F » de `drizzle-manuel-diagnostic.sql`, avant de déployer.

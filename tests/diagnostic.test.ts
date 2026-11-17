@@ -32,6 +32,13 @@ test("domaines à examiner : messagerie professionnelle et site, jamais une mess
   assert.deepEqual(targetsOf("", "pas une adresse"), { mailDomain: "", webHost: "" });
   assert.deepEqual(targetsOf("a@b", "http://127.0.0.1/"), { mailDomain: "", webHost: "" });
   assert.deepEqual(targetsOf("x@exemple.fr", "https://autre-site.com"), { mailDomain: "exemple.fr", webHost: "autre-site.com" });
+  // Plateformes partagées par une profession (cas relevés sur les vraies fiches) : ni le domaine, ni ses sous-domaines.
+  assert.deepEqual(targetsOf("office.n3b@notaires.fr", "https://www.notaires-n3b.fr"), { mailDomain: "notaires-n3b.fr", webHost: "www.notaires-n3b.fr" });
+  assert.deepEqual(targetsOf("office@notaires.fr", "https://saphir.notaires.fr"), { mailDomain: "", webHost: "" });
+  assert.deepEqual(targetsOf("x@lccbn.notaires.fr", "https://azko.fr"), { mailDomain: "azko.fr", webHost: "azko.fr" });
+  assert.deepEqual(targetsOf("rdv@exceptions.doctolib.fr", "https://www.doctolib.fr/cabinet"), { mailDomain: "", webHost: "" });
+  assert.deepEqual(targetsOf("contact@cabinet.fr", "https://www.doctolib.fr/cabinet"), { mailDomain: "cabinet.fr", webHost: "cabinet.fr" });
+  assert.deepEqual(targetsOf("contact@mes-notaires.fr", ""), { mailDomain: "mes-notaires.fr", webHost: "mes-notaires.fr" }); // simple ressemblance de nom : gardé
 });
 
 test("réponses DNS sur HTTPS : présent, absent (NXDOMAIN ou sans réponse du bon type), erreur", () => {

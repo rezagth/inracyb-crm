@@ -1,6 +1,7 @@
 -- Campagne Diagnostic, phase A : une seule séquence en cours par entreprise, tous services confondus.
 -- Ne touche à aucune donnée. Sans danger si relancé (IF NOT EXISTS).
--- À coller dans Neon > SQL Editor si `npm run db:migrate` ne peut pas se connecter depuis ton Mac.
+-- Sur la base en service : ce fichier, en entier, jamais `npm run db:migrate` (seule la 1re migration Drizzle y est enregistrée).
+-- psql "$PROD_URL" -X -v ON_ERROR_STOP=1 -f drizzle-manuel-diagnostic.sql   (ou à coller dans Neon > SQL Editor)
 
 -- 1) Contrôle à lancer AVANT : cette requête doit ne renvoyer aucune ligne.
 --    Si elle en renvoie, une entreprise est « en cours » dans deux campagnes : arrête l'une des deux

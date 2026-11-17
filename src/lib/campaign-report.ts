@@ -26,6 +26,34 @@ export type ProspectRecord = {
   signed: string[];
 };
 
+/**
+ * Une entreprise peut figurer dans plusieurs campagnes d'un même service (arrêtée dans l'une, reprise dans une autre) :
+ * le bilan la compte une seule fois par service. Mails, premier envoi et accusés sont déjà ceux du service entier ;
+ * une réponse, un rebond, une plainte ou une désinscription dans l'une des campagnes vaut pour l'entreprise.
+ * Le segment retenu est celui de la première inscription (ordre reçu).
+ */
+export function onePerCompany(records: (ProspectRecord & { companyId: string })[]): ProspectRecord[] {
+  const out = new Map<string, ProspectRecord>();
+  for (const { companyId, ...r } of records) {
+    const key = companyId + "|" + r.service;
+    const m = out.get(key);
+    if (!m) {
+      out.set(key, { ...r, meetings: [...r.meetings], signed: [...r.signed] });
+      continue;
+    }
+    m.firstSend = [m.firstSend, r.firstSend].filter((d): d is string => !!d).sort()[0] ?? null;
+    m.mails = Math.max(m.mails, r.mails);
+    m.delivered = m.delivered === null || r.delivered === null ? (m.delivered ?? r.delivered) : m.delivered || r.delivered;
+    m.bounced ||= r.bounced;
+    m.complained ||= r.complained;
+    m.optedOut ||= r.optedOut;
+    m.replied ||= r.replied;
+    m.meetings = [...new Set([...m.meetings, ...r.meetings])];
+    m.signed = [...new Set([...m.signed, ...r.signed])];
+  }
+  return [...out.values()];
+}
+
 export const HORIZONS = [14, 30] as const;
 export type Horizon = (typeof HORIZONS)[number] | null;
 
