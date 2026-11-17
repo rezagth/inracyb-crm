@@ -1,7 +1,7 @@
 import "server-only";
 import { db, schema } from "@/db";
 import {
-  ANNUAIRE_ENDPOINT, PLACES_ENDPOINT, PLACES_FIELDS, buildAnnuaireParams, buildPlacesBody, explainAnnuaireError,
+  ANNUAIRE_ENDPOINT, PLACES_ENDPOINT, PLACES_FIELDS, buildAnnuaireParams, buildPlacesBody, explainAnnuaireError, explainPlacesError, placesRetryable,
   matchByName, normalizeCompany, normalizeSearch, pickPlace, type Candidate, type SearchInput, type SearchPage,
 } from "@/lib/prospect-search";
 
@@ -53,24 +53,30 @@ export async function fetchByName(name: string, postalCode: string, city: string
   return { ok: true, company: matchByName(normalizeSearch(r.json).items, name, postalCode, city) };
 }
 
-export async function findPlace(name: string, city: string, postalCode: string): Promise<Res<{ phone: string; website: string } | { phone: ""; website: "" }>> {
+export async function findPlace(name: string, city: string, postalCode: string, retryMs = 2_000): Promise<Res<{ phone: string; website: string } | { phone: ""; website: "" }>> {
   const key = (process.env.GOOGLE_PLACES_API_KEY || "").trim();
   if (!key) return { ok: false, error: "Google Places n'est pas configuré : ajoute GOOGLE_PLACES_API_KEY dans .env (et dans Vercel)." };
-  try {
-    const res = await fetch(PLACES_ENDPOINT, {
-      method: "POST",
-      headers: { "content-type": "application/json", "x-goog-api-key": key, "x-goog-fieldmask": PLACES_FIELDS },
-      body: JSON.stringify(buildPlacesBody(name, city)),
-      signal: AbortSignal.timeout(12_000),
-      cache: "no-store",
-    });
+  // Une erreur passagère de Google (5xx, réseau) a droit à un seul nouvel essai, après une courte pause.
+  for (let attempt = 1; ; attempt++) {
+    let res: Response;
+    try {
+      res = await fetch(PLACES_ENDPOINT, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-goog-api-key": key, "x-goog-fieldmask": PLACES_FIELDS },
+        body: JSON.stringify(buildPlacesBody(name, city)),
+        signal: AbortSignal.timeout(12_000),
+        cache: "no-store",
+      });
+    } catch {
+      if (attempt < 2) { await new Promise((r) => setTimeout(r, retryMs)); continue; }
+      return { ok: false, error: "Google Places ne répond pas, même après un nouvel essai. Réessaie dans un instant." };
+    }
     const json: unknown = await res.json().catch(() => null);
-    if (res.status === 403 || res.status === 401) return { ok: false, error: "Google refuse la clé : vérifie GOOGLE_PLACES_API_KEY et que « Places API (New) » est activée avec la facturation." };
-    if (res.status === 429) return { ok: false, error: "Quota Google Places atteint : réessaie plus tard." };
-    if (!res.ok) return { ok: false, error: `Google Places a répondu ${res.status}.` };
+    if (!res.ok) {
+      if (placesRetryable(res.status) && attempt < 2) { await new Promise((r) => setTimeout(r, retryMs)); continue; }
+      return { ok: false, error: explainPlacesError(res.status, json) };
+    }
     const hit = pickPlace(json, postalCode, city);
     return hit ? { ok: true, ...hit } : { ok: true, phone: "", website: "" };
-  } catch {
-    return { ok: false, error: "Google Places ne répond pas. Réessaie dans un instant." };
   }
 }

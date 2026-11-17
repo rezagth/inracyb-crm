@@ -179,6 +179,24 @@ export function explainAnnuaireError(status: number, body: unknown): string {
 export const PLACES_ENDPOINT = "https://places.googleapis.com/v1/places:searchText";
 export const PLACES_FIELDS = "places.displayName,places.formattedAddress,places.nationalPhoneNumber,places.websiteUri";
 
+/** Erreur passagère de Google (serveur indisponible ou surchargé) : un nouvel essai a des chances d'aboutir. */
+export const placesRetryable = (status: number): boolean => status === 500 || status === 502 || status === 503 || status === 504;
+
+/**
+ * Message lisible pour une erreur de Google Places, avec l'explication renvoyée par Google quand il y en a une
+ * (raccourcie, sans jamais recopier une clé d'API).
+ */
+export function explainPlacesError(status: number, body: unknown): string {
+  const e = rec(rec(body).error);
+  const detail = (str(e.message) || str(e.status)).replace(/AIza[0-9A-Za-z_-]{10,}/g, "[clé]").replace(/\s+/g, " ").trim().slice(0, 160);
+  const why = detail ? ` (${detail})` : "";
+  if (status === 403 || status === 401) return `Google refuse la clé : vérifie GOOGLE_PLACES_API_KEY et que « Places API (New) » est activée avec la facturation${why}.`;
+  if (status === 429) return `Quota Google Places atteint : réessaie plus tard${why}.`;
+  if (status === 400) return `Requête refusée par Google Places${why}.`;
+  if (placesRetryable(status)) return `Google Places est indisponible pour le moment (${status}), même après un nouvel essai${why}.`;
+  return `Google Places a répondu ${status}${why}.`;
+}
+
 export function buildPlacesBody(name: string, city: string) {
   return { textQuery: `${name} ${city}`.trim(), languageCode: "fr", regionCode: "FR", maxResultCount: 3 };
 }

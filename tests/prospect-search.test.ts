@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildAnnuaireParams, buildPlacesBody, explainAnnuaireError, normalizeCompany, normalizeSearch, pickDirector, pickPlace, sectorFromNaf, titleCase, OFFER_SIZES } from "../src/lib/prospect-search";
+import { buildAnnuaireParams, buildPlacesBody, explainAnnuaireError, explainPlacesError, placesRetryable, normalizeCompany, normalizeSearch, pickDirector, pickPlace, sectorFromNaf, titleCase, OFFER_SIZES } from "../src/lib/prospect-search";
 
 // Forme réelle d'une réponse de l'API recherche-entreprises.api.gouv.fr (champs utiles uniquement).
 const fidal = {
@@ -92,4 +92,13 @@ test("erreurs de l'Annuaire : messages lisibles", () => {
   assert.match(explainAnnuaireError(429, null), /limite le débit/);
   assert.match(explainAnnuaireError(400, { message: "departement invalide" }), /departement invalide/);
   assert.match(explainAnnuaireError(503, null), /indisponible/);
+});
+
+test("Google Places : erreurs passagères réessayées, message de Google repris sans jamais recopier une clé", () => {
+  assert.deepEqual([500, 502, 503, 504, 400, 401, 403, 429].map(placesRetryable), [true, true, true, true, false, false, false, false]);
+  assert.equal(explainPlacesError(503, { error: { code: 503, message: "The service is currently unavailable.", status: "UNAVAILABLE" } }), "Google Places est indisponible pour le moment (503), même après un nouvel essai (The service is currently unavailable.).");
+  assert.match(explainPlacesError(403, { error: { message: "API key not valid: AIzaSyD-abcdefghijklmnop1234" } }), /^Google refuse la clé .*\(API key not valid: \[clé\]\)\.$/);
+  assert.equal(explainPlacesError(429, null), "Quota Google Places atteint : réessaie plus tard.");
+  assert.equal(explainPlacesError(418, "x"), "Google Places a répondu 418.");
+  assert.ok(explainPlacesError(400, { error: { message: "x".repeat(500) } }).length < 220);
 });
