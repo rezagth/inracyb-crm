@@ -5,7 +5,7 @@ import { entryExclusion, ENTRY_EXCLUSION_LABEL, SERVICE_LABEL, serviceOf, type S
 import { greetsWithoutName, hostOf, pickPublishedEmail, siteFromNotes } from "@/lib/contact-extract";
 import { DIAGNOSTIC_FRESH_DAYS, RULES_VERSION, usableDiagnostic, type Probe } from "@/lib/diagnostic";
 import { SEGMENTS, isSegment, segmentOfSector, type Segment } from "@/lib/diagnostic-mails";
-import { enrolSlots, FEED_DEFAULTS, MAILS_PER_PROSPECT, nextCursor, parseDepartements, permanentName, readCursors, REJECT, searchPlan, type Cursor } from "@/lib/feed";
+import { enrolSlots, FEED_DEFAULTS, isPhone, MAILS_PER_PROSPECT, missingCoordinates, nextCursor, parseDepartements, permanentName, readCursors, REJECT, searchPlan, type Cursor } from "@/lib/feed";
 import { addDays, today } from "@/lib/format";
 import { EFFECTIF_CODES, type SearchInput } from "@/lib/prospect-search";
 import { checkServicePauses, crossHistories, getDailyState, optoutSet, restDays } from "./campaigns";
@@ -37,10 +37,14 @@ export async function getFeedSettings() {
 const ACTIVE_STAGES = ["a_completer", "a_diagnostiquer", "a_inscrire"];
 const cp = (address: string) => /\b(\d{5})\b/.exec(address)?.[1] ?? "";
 
+/** Coordonnées vérifiées d'un candidat : tout est là, il manque quelque chose (écarté), ou il faut attendre (quota, panne). */
+type Verified = { kind: "ok"; email: string; phone: string; site: string } | { kind: "skip"; reason: string } | { kind: "wait"; reason: string };
+
 /**
- * Un passage de l'alimentation automatique : inscrire ce qui est prêt, chercher et importer, compléter, diagnostiquer,
- * puis inscrire de nouveau. Chaque étape s'arrête quand le temps imparti est presque écoulé ; le reste est repris au
- * passage suivant. Rien ne se passe tant que l'interrupteur global est sur « arrêt ».
+ * Un passage de l'alimentation automatique : inscrire ce qui est prêt, vérifier les candidats de l'Annuaire (une entreprise
+ * n'entre dans le CRM qu'avec une adresse mail publiée ET un téléphone), diagnostiquer, puis inscrire de nouveau. Chaque étape
+ * s'arrête quand le temps imparti est presque écoulé ; le reste est repris au passage suivant. Rien ne se passe tant que
+ * l'interrupteur global est sur « arrêt ».
  */
 export async function runFeed(opts: { source?: "cron" | "manuel"; budgetMs?: number; deps?: Partial<FeedDeps> } = {}): Promise<FeedSummary> {
   const started = Date.now();
@@ -61,12 +65,17 @@ export async function runFeed(opts: { source?: "cron" | "manuel"; budgetMs?: num
     await move(id, { stage: "ecarte", reason });
     sum.rejected++;
   };
+  // Quota Google Places du jour, partagé par toutes les étapes du passage.
+  let placesUsed = s.placesDay === t ? s.placesUsed : 0;
+  const placesMax = Math.max(0, s.placesDaily);
+  let placesDown = "";
+  const firstStage = s.feedDiagnostic ? "a_diagnostiquer" : "a_inscrire";
 
   try {
     sum.ran = true;
     await enrol();
-    if (left() > 12_000) await searchAndImport();
-    if (left() > 22_000) await enrich();
+    if (left() > 15_000) await recheckLegacy();
+    if (left() > 15_000) await searchAndVerify();
     if (s.feedDiagnostic && left() > 14_000) await diagnoseReady();
     if (left() > 3_000) await enrol();
   } catch (e) {
@@ -75,7 +84,15 @@ export async function runFeed(opts: { source?: "cron" | "manuel"; budgetMs?: num
     notes.push("Passage interrompu par une erreur : repris au prochain passage.");
   }
 
-  sum.message = [`${sum.found} trouvée(s)`, `${sum.imported} importée(s)`, `${sum.completed} complétée(s)`, `${sum.diagnosed} diagnostiquée(s)`, `${sum.enrolled} inscrite(s)`, `${sum.rejected} écartée(s)`, ...notes].join(" · ");
+  try {
+    await db.update(schema.feedSettings).set({ placesDay: t, placesUsed }).where(eq(schema.feedSettings.id, 1));
+  } catch (e) {
+    console.error("alimentation : compteur Google Places non enregistré", e instanceof Error ? e.message : "");
+  }
+  if (placesDown) notes.push(placesDown.replace(/^En attente : /, "Google Places : "));
+  else if (deps.place && placesUsed >= placesMax) notes.push(`Quota Google Places du jour atteint (${placesMax})`);
+  if (!deps.place) notes.push("Google Places non configuré : aucune entreprise ne peut être vérifiée");
+  sum.message = [`${sum.found} trouvée(s)`, `${sum.imported} intégrée(s) avec mail et téléphone`, `${sum.diagnosed} diagnostiquée(s)`, `${sum.enrolled} inscrite(s)`, `${sum.rejected} écartée(s)`, ...notes].join(" · ");
   try {
     await db.insert(schema.feedRuns).values({ source: opts.source ?? "cron", ok: sum.ok, found: sum.found, imported: sum.imported, completed: sum.completed, diagnosed: sum.diagnosed, enrolled: sum.enrolled, rejected: sum.rejected, message: sum.message.slice(0, 800) });
   } catch (e) {
@@ -83,11 +100,52 @@ export async function runFeed(opts: { source?: "cron" | "manuel"; budgetMs?: num
   }
   return sum;
 
-  /** Recherche dans l'Annuaire, segment par segment, et import des entreprises nouvelles, dans la limite du jour. */
-  async function searchAndImport() {
+  /**
+   * Site et téléphone (Google Places, dans la limite du quota du jour, sauf si le site est déjà connu), puis adresse publiée
+   * sur le site (générique d'abord, jamais devinée) et téléphone du site à défaut de celui de Google. Les deux sont obligatoires.
+   */
+  async function verify(name: string, city: string, address: string, knownSite: string): Promise<Verified> {
+    let site = knownSite;
+    let phone = "";
+    if (!site) {
+      if (!deps.place) return { kind: "wait", reason: "En attente : Google Places non configuré" };
+      if (placesDown) return { kind: "wait", reason: placesDown };
+      if (placesUsed >= placesMax) return { kind: "wait", reason: "En attente : quota Google Places du jour atteint" };
+      placesUsed++;
+      const p = await deps.place(name, city, cp(address));
+      if (!p.ok) {
+        placesDown = `En attente : ${p.error}`;
+        return { kind: "wait", reason: placesDown };
+      }
+      phone = p.phone.replace(/\s+/g, " ").trim();
+      if (p.website) site = /^https?:\/\//i.test(p.website) ? p.website : "https://" + p.website;
+    }
+    if (!site) return { kind: "skip", reason: REJECT.noSite };
+    const crawl = await deps.crawl(site, 9_000);
+    if (!crawl.pages) return { kind: "skip", reason: `${REJECT.unreadable}${crawl.error ? ` (${crawl.error})` : ""}` };
+    const email = pickPublishedEmail(crawl.emails, hostOf(site));
+    if (!isPhone(phone)) phone = crawl.phones.find(isPhone) ?? "";
+    const missing = missingCoordinates(email, phone);
+    return missing ? { kind: "skip", reason: missing } : { kind: "ok", email, phone, site };
+  }
+
+  /** Candidat écarté hors du CRM : noté une fois pour toutes, jamais revérifié. */
+  async function skip(siren: string, name: string, segment: string, reason: string) {
+    if (siren) await db.insert(schema.feedSkipped).values({ siren, name: name.slice(0, 200), segment, reason: reason.slice(0, 300), skippedOn: t }).onConflictDoNothing();
+    sum.rejected++;
+  }
+
+  /**
+   * Recherche dans l'Annuaire, segment par segment. Chaque candidat nouveau est vérifié AVANT d'entrer dans le CRM :
+   * avec une adresse publiée et un téléphone, il est créé avec son contact complet ; sinon il reste hors du CRM.
+   * Une page de l'Annuaire n'est considérée comme lue que lorsque tous ses candidats ont été traités.
+   */
+  async function searchAndVerify() {
+    if (!deps.place) return; // sans Google Places, aucun site ni téléphone : rien ne peut être vérifié
     const rows = await db.select({ name: schema.companies.name, siren: schema.companies.siren }).from(schema.companies);
     const sirens = new Set(rows.map((r) => r.siren).filter(Boolean));
     const names = new Set(rows.map((r) => r.name.trim().toLowerCase()));
+    const skipped = new Set((await db.select({ siren: schema.feedSkipped.siren }).from(schema.feedSkipped)).map((r) => r.siren));
     const prixAuditCents = (await getProfile()).prixAuditCents;
     const effectifs = s.effectifs.split(",").filter((c) => EFFECTIF_CODES.includes(c));
     const departements = parseDepartements(s.departements);
@@ -95,16 +153,18 @@ export async function runFeed(opts: { source?: "cron" | "manuel"; budgetMs?: num
     const perDay = Math.max(0, Math.min(s.importPerSegment, 200));
     let dup = 0, blocked = 0;
 
-    for (const segment of SEGMENTS) {
+    for (const [k, segment] of SEGMENTS.entries()) {
       const plan = searchPlan(segment, departements);
       if (!plan.length) continue;
       const mine = await db.select({ stage: schema.feedItems.stage, importedOn: schema.feedItems.importedOn }).from(schema.feedItems).where(eq(schema.feedItems.segment, segment));
       const stock = mine.filter((i) => ACTIVE_STAGES.includes(i.stage)).length;
-      // Deux limites : le plafond d'import du jour, et un stock d'entreprises en cours de traitement qui ne dépasse pas deux jours d'import.
+      // Deux limites : les entreprises intégrées du jour, et un stock en cours de traitement qui ne dépasse pas deux jours d'intégration.
       let quota = Math.min(perDay - mine.filter((i) => i.importedOn === t).length, 2 * perDay - stock);
+      // Le quota Google du jour est partagé équitablement entre les segments qui restent à traiter.
+      const placesCap = placesUsed + Math.ceil(Math.max(0, placesMax - placesUsed) / (SEGMENTS.length - k));
       let cur: Cursor = cursors[segment] && cursors[segment]!.combo < plan.length ? cursors[segment]! : { combo: 0, page: 1 };
       // Au plus 8 pages de l'Annuaire par segment et par passage : assez pour avancer, sans solliciter l'API à l'excès.
-      for (let pages = 0; quota > 0 && pages < 8 && left() > 8_000; pages++) {
+      for (let pages = 0; quota > 0 && pages < 8 && left() > 15_000 && !placesDown && placesUsed < placesCap; pages++) {
         const { sector, departement } = plan[cur.combo];
         const r = await deps.search({ offer: "audit", sector, departement, effectifs, query: "", page: cur.page });
         if (!r.ok) {
@@ -112,20 +172,41 @@ export async function runFeed(opts: { source?: "cron" | "manuel"; budgetMs?: num
           break;
         }
         sum.found += r.page.items.length;
+        const fresh: typeof r.page.items = [];
+        const seen = new Set<string>();
         for (const c of r.page.items) {
-          if (quota <= 0) break;
           if (c.blocked) { blocked++; continue; }
-          if (c.inCrm || sirens.has(c.siren) || names.has(c.name.trim().toLowerCase())) { dup++; continue; }
-          if (segmentOfSector(c.sector) !== segment) continue;
-          const companyId = await insertProspect(c, { offer: "audit", prixAuditCents, event: "Entreprise importée par l'alimentation automatique" });
-          await db.insert(schema.feedItems).values({ companyId, segment, importedOn: t, movedOn: t });
-          sirens.add(c.siren);
-          names.add(c.name.trim().toLowerCase());
-          sum.imported++;
-          quota--;
+          if (c.inCrm || sirens.has(c.siren) || seen.has(c.siren) || names.has(c.name.trim().toLowerCase())) { dup++; continue; }
+          if (skipped.has(c.siren) || segmentOfSector(c.sector) !== segment) continue;
+          seen.add(c.siren);
+          fresh.push(c);
         }
-        // La page n'est considérée comme lue que si elle a été parcourue en entier.
-        if (quota <= 0) break;
+        let done = 0;
+        let stop = false;
+        while (done < fresh.length && !stop) {
+          if (quota <= 0 || left() < 15_000 || placesDown || placesUsed >= placesCap) break;
+          const batch = fresh.slice(done, done + Math.min(3, quota, placesCap - placesUsed));
+          const results = await Promise.all(batch.map((c) => verify(c.name, c.city, c.address, "")));
+          for (const [i, c] of batch.entries()) {
+            const v = results[i];
+            if (v.kind === "wait") { stop = true; continue; }
+            if (v.kind === "skip") {
+              await skip(c.siren, c.name, segment, v.reason);
+              skipped.add(c.siren);
+            } else {
+              const companyId = await insertProspect(c, { offer: "audit", prixAuditCents, phone: v.phone, website: v.site, email: v.email, event: `Entreprise importée par l'alimentation automatique : site ${hostOf(v.site)}, e-mail publié sur le site ${v.email}, téléphone ${v.phone}` });
+              await db.insert(schema.feedItems).values({ companyId, segment, stage: firstStage, importedOn: t, movedOn: t });
+              sirens.add(c.siren);
+              names.add(c.name.trim().toLowerCase());
+              sum.imported++;
+              sum.completed++;
+              quota--;
+            }
+          }
+          // Un candidat en attente (quota ou panne de Google) n'est pas noté : la page sera relue au passage suivant.
+          if (!stop) done += batch.length;
+        }
+        if (done < fresh.length) break; // page pas entièrement traitée : on la relira
         const next = nextCursor(cur, r.page.totalPages, plan.length);
         cur = { combo: next.combo, page: next.page };
         if (next.wrapped) break;
@@ -137,54 +218,47 @@ export async function runFeed(opts: { source?: "cron" | "manuel"; budgetMs?: num
     if (blocked) notes.push(`${blocked} opposée(s) à la prospection`);
   }
 
-  /** Site web et téléphone (Google Places, dans la limite du quota du jour), puis adresse publiée sur le site. Jamais d'adresse devinée. */
-  async function enrich() {
-    let placesUsed = s.placesDay === t ? s.placesUsed : 0;
-    const placesMax = Math.max(0, s.placesDaily);
-    let placesDown = "";
-    const items = await db.select().from(schema.feedItems).where(eq(schema.feedItems.stage, "a_completer")).orderBy(asc(schema.feedItems.tries), asc(schema.feedItems.createdAt)).limit(60);
-    for (let k = 0; k < items.length && left() > 22_000; k += 3) {
-      await Promise.all(
-        items.slice(k, k + 3).map(async (it) => {
+  /**
+   * Entreprises importées avant la règle stricte, encore « à compléter » : même vérification. Complètes, elles poursuivent ;
+   * incomplètes, elles sont retirées du CRM si elles n'y ont laissé aucune trace (aucun échange, envoi, campagne, devis…),
+   * sinon gardées et marquées écartées.
+   */
+  async function recheckLegacy() {
+    const items = await db.select().from(schema.feedItems).where(eq(schema.feedItems.stage, "a_completer")).orderBy(asc(schema.feedItems.createdAt)).limit(60);
+    let removed = 0;
+    for (let k = 0; k < items.length && left() > 15_000 && !placesDown; k += 3) {
+      const batch = items.slice(k, k + 3);
+      const results = await Promise.all(
+        batch.map(async (it) => {
           const c = (await db.select().from(schema.companies).where(eq(schema.companies.id, it.companyId)).limit(1))[0];
-          if (!c) return reject(it.id, REJECT.gone);
-          const ct = (await db.select().from(schema.contacts).where(eq(schema.contacts.companyId, c.id)).orderBy(desc(schema.contacts.isPrimary)).limit(1))[0];
-          let site = siteFromNotes(c.notes);
-          let phone = "";
-          if (!site) {
-            if (!deps.place) return reject(it.id, `${REJECT.noSite} (Google Places non configuré)`);
-            if (placesDown || placesUsed >= placesMax) return move(it.id, { reason: placesDown || "En attente : quota Google Places du jour atteint" });
-            placesUsed++;
-            const p = await deps.place(c.name, c.city, cp(c.address));
-            if (!p.ok) {
-              placesDown = `En attente : ${p.error}`;
-              return move(it.id, { reason: placesDown });
-            }
-            phone = p.phone.replace(/\s+/g, " ");
-            if (p.website) site = /^https?:\/\//i.test(p.website) ? p.website : "https://" + p.website;
-          }
-          if (!site) {
-            if (phone) await saveContact(c, ct, "", phone, "");
-            return reject(it.id, phone ? `${REJECT.noSite} (téléphone trouvé)` : REJECT.noSite);
-          }
-          const crawl = await deps.crawl(site, 9_000);
-          if (!crawl.pages) {
-            await saveContact(c, ct, "", phone, site);
-            const tries = it.tries + 1;
-            return tries >= FEED_DEFAULTS.maxTries ? reject(it.id, `${REJECT.unreadable}${crawl.error ? ` (${crawl.error})` : ""}`) : move(it.id, { tries, reason: `Site illisible pour l'instant${crawl.error ? ` (${crawl.error})` : ""} : nouvel essai` });
-          }
-          const email = ct?.email.trim() ? "" : pickPublishedEmail(crawl.emails, hostOf(site));
-          phone = phone || (crawl.phones[0] ?? "");
-          await saveContact(c, ct, email, phone, site);
-          if (!email && !ct?.email.trim()) return reject(it.id, phone ? `${REJECT.noEmail} (téléphone trouvé)` : REJECT.noEmail);
-          sum.completed++;
-          return move(it.id, { stage: s.feedDiagnostic ? "a_diagnostiquer" : "a_inscrire", reason: "", tries: 0 });
+          return c ? { it, c, v: await verify(c.name, c.city, c.address, siteFromNotes(c.notes)) } : { it, c: undefined, v: undefined };
         }),
       );
+      let wait = false;
+      for (const { it, c, v } of results) {
+        if (!c || !v) { await reject(it.id, REJECT.gone); continue; }
+        if (v.kind === "wait") { wait = true; await move(it.id, { reason: v.reason }); continue; }
+        if (v.kind === "ok") {
+          const ct = (await db.select().from(schema.contacts).where(eq(schema.contacts.companyId, c.id)).orderBy(desc(schema.contacts.isPrimary)).limit(1))[0];
+          await saveContact(c, ct, v.email, v.phone, v.site);
+          sum.completed++;
+          await move(it.id, { stage: firstStage, reason: "", tries: 0 });
+          continue;
+        }
+        if (await untouched(c.id)) {
+          await db.transaction(async (tx) => {
+            await tx.delete(schema.companies).where(eq(schema.companies.id, c.id));
+            if (c.siren) await tx.insert(schema.feedSkipped).values({ siren: c.siren, name: c.name.slice(0, 200), segment: it.segment, reason: v.reason.slice(0, 300), skippedOn: t }).onConflictDoNothing();
+          });
+          sum.rejected++;
+          removed++;
+        } else {
+          await reject(it.id, v.reason);
+        }
+      }
+      if (wait) break;
     }
-    await db.update(schema.feedSettings).set({ placesDay: t, placesUsed }).where(eq(schema.feedSettings.id, 1));
-    if (placesDown) notes.push(placesDown.replace(/^En attente : /, "Google Places : "));
-    else if (placesUsed >= placesMax && deps.place) notes.push(`Quota Google Places du jour atteint (${placesMax})`);
+    if (removed) notes.push(`${removed} entreprise(s) incomplète(s) retirée(s) du CRM`);
   }
 
   /** Enregistre ce qui a été trouvé, sans jamais remplacer une coordonnée déjà présente. L'adresse vient du site : origine « site ». */
@@ -331,6 +405,24 @@ export async function runFeed(opts: { source?: "cron" | "manuel"; budgetMs?: num
   }
 }
 
+/**
+ * Entreprise créée par l'alimentation et restée sans aucune trace : ni échange, ni envoi, ni campagne, ni diagnostic, ni pièce
+ * commerciale ou de suivi. Seul cas où l'alimentation retire une entreprise du CRM.
+ */
+async function untouched(companyId: string): Promise<boolean> {
+  const c = (await db.select({ source: schema.companies.source, stage: schema.companies.stage }).from(schema.companies).where(eq(schema.companies.id, companyId)).limit(1))[0];
+  if (!c || c.source !== "Recherche automatique" || c.stage !== "qualif") return false;
+  const any = async (table: typeof schema.tasks | typeof schema.quotes | typeof schema.invoices | typeof schema.calls | typeof schema.meetings | typeof schema.mailSends | typeof schema.mailCampaignItems | typeof schema.companyDiagnostics | typeof schema.contracts | typeof schema.missions | typeof schema.tickets | typeof schema.securityActions | typeof schema.audits | typeof schema.incidents | typeof schema.documents) =>
+    (await db.select({ n: sql<number>`count(*)` }).from(table).where(eq(table.companyId, companyId)))[0].n > 0;
+  for (const table of [schema.tasks, schema.quotes, schema.invoices, schema.calls, schema.meetings, schema.mailSends, schema.mailCampaignItems, schema.companyDiagnostics, schema.contracts, schema.missions, schema.tickets, schema.securityActions, schema.audits, schema.incidents, schema.documents]) {
+    if (await any(table)) return false;
+  }
+  if ((await db.select({ n: sql<number>`count(*)` }).from(schema.contacts).where(and(eq(schema.contacts.companyId, companyId), ne(schema.contacts.email, ""))))[0].n > 0) return false;
+  // Seuls les événements écrits par l'alimentation elle-même sont admis.
+  const evs = await db.select({ type: schema.events.type, text: schema.events.text }).from(schema.events).where(eq(schema.events.companyId, companyId));
+  return evs.every((e) => /alimentation automatique/i.test(e.text));
+}
+
 /** Compteurs du jour et état du stock, pour la page Alimentation. */
 export async function feedOverview(t = today()) {
   const s = await getFeedSettings();
@@ -338,11 +430,13 @@ export async function feedOverview(t = today()) {
   const day = await db.select({ stage: schema.feedItems.stage, n: sql<number>`count(*)` }).from(schema.feedItems).where(eq(schema.feedItems.movedOn, t)).groupBy(schema.feedItems.stage);
   const importedToday = Number((await db.select({ n: sql<number>`count(*)` }).from(schema.feedItems).where(eq(schema.feedItems.importedOn, t)))[0]?.n ?? 0);
   const count = (rows: { stage: string; n: number }[], k: string) => Number(rows.find((r) => r.stage === k)?.n ?? 0);
+  const skippedAll = Number((await db.select({ n: sql<number>`count(*)` }).from(schema.feedSkipped))[0]?.n ?? 0);
+  const skippedToday = Number((await db.select({ n: sql<number>`count(*)` }).from(schema.feedSkipped).where(eq(schema.feedSkipped.skippedOn, t)))[0]?.n ?? 0);
   return {
     settings: s,
     placesReady: placesReady(),
     placesUsedToday: s.placesDay === t ? s.placesUsed : 0,
-    today: { imported: importedToday, enrolled: count(day, "inscrit"), rejected: count(day, "ecarte") },
-    stock: { toComplete: count(stages, "a_completer"), toDiagnose: count(stages, "a_diagnostiquer"), ready: count(stages, "a_inscrire"), enrolled: count(stages, "inscrit"), rejected: count(stages, "ecarte") },
+    today: { imported: importedToday, enrolled: count(day, "inscrit"), rejected: count(day, "ecarte") + skippedToday },
+    stock: { toComplete: count(stages, "a_completer"), toDiagnose: count(stages, "a_diagnostiquer"), ready: count(stages, "a_inscrire"), enrolled: count(stages, "inscrit"), rejected: count(stages, "ecarte") + skippedAll },
   };
 }

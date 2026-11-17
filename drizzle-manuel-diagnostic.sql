@@ -100,3 +100,17 @@ CREATE TABLE IF NOT EXISTS "feed_settings" (
 	"cursors" text DEFAULT '{}' NOT NULL
 );
 ALTER TABLE "mail_campaigns" ADD COLUMN IF NOT EXISTS "auto" boolean DEFAULT false NOT NULL;CREATE UNIQUE INDEX IF NOT EXISTS "feed_items_company_uq" ON "feed_items" USING btree ("company_id");CREATE INDEX IF NOT EXISTS "feed_items_stage_idx" ON "feed_items" USING btree ("stage","segment");
+
+-- ————————————————————————————————————————————————————————————————
+-- Phase G : alimentation stricte. Une entreprise n'entre dans le CRM que si son adresse mail ET son téléphone ont été trouvés ;
+-- les autres candidats sont notés ici, hors du CRM, pour ne jamais être revérifiés. Nouvelle table, rien d'existant n'est modifié.
+-- À appliquer AVANT de déployer le code de la phase G. Sans danger si relancé.
+CREATE TABLE IF NOT EXISTS "feed_skipped" (
+	"siren" text PRIMARY KEY NOT NULL,
+	"name" text NOT NULL,
+	"segment" text NOT NULL,
+	"reason" text NOT NULL,
+	"skipped_on" text NOT NULL,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+CREATE INDEX IF NOT EXISTS "feed_skipped_on_idx" ON "feed_skipped" USING btree ("skipped_on");

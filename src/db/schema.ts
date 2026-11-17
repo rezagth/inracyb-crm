@@ -410,6 +410,24 @@ export const feedItems = pgTable(
 );
 
 /** Journal des passages de l'alimentation automatique. */
+/**
+ * Candidats de l'Annuaire écartés AVANT d'entrer dans le CRM : adresse mail ou téléphone introuvable, site absent ou illisible.
+ * Ils ne sont jamais revérifiés (ni requête Google Places, ni lecture du site) et n'apparaissent que dans la page Alimentation.
+ */
+export const feedSkipped = pgTable(
+  "feed_skipped",
+  {
+    siren: text("siren").primaryKey(),
+    name: text("name").notNull(),
+    segment: text("segment").notNull(),
+    reason: text("reason").notNull(),
+    /** date de l'écart (AAAA-MM-JJ) */
+    skippedOn: text("skipped_on").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [index("feed_skipped_on_idx").on(t.skippedOn)],
+);
+
 export const feedRuns = pgTable("feed_runs", {
   id: id(),
   source: text("source").notNull().default("cron"),

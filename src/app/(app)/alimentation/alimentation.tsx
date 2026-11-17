@@ -43,7 +43,7 @@ export function Alimentation({ settings, sizes, placesReady, placesUsedToday, to
               aria-checked={settings.enabled}
               className={settings.enabled ? "btn btn-danger btn-sm" : "btn btn-pri btn-sm"}
               disabled={pending}
-              onClick={() => (settings.enabled || window.confirm("Mettre l'alimentation en marche ?\n\nChaque jour ouvré, des entreprises seront importées, complétées et inscrites automatiquement dans les campagnes permanentes, et recevront des mails dans la limite des plafonds.")) && run(() => setFeedEnabledAction(!settings.enabled))}
+              onClick={() => (settings.enabled || window.confirm("Mettre l'alimentation en marche ?\n\nChaque jour ouvré, des entreprises dont l'adresse mail et le téléphone sont trouvés seront intégrées et inscrites automatiquement dans les campagnes permanentes, et recevront des mails dans la limite des plafonds.")) && run(() => setFeedEnabledAction(!settings.enabled))}
             >
               {settings.enabled ? "Arrêter l'alimentation" : "Mettre en marche"}
             </button>
@@ -55,7 +55,7 @@ export function Alimentation({ settings, sizes, placesReady, placesUsedToday, to
             {settings.enabled ? "Passage automatique chaque jour ouvré, avant les diagnostics et les envois. L'arrêt est immédiat : plus aucune recherche, aucun import, aucune inscription. Les séquences déjà commencées continuent ; pour les arrêter aussi, mets la campagne en pause dans Campagnes." : "Rien n'est cherché, importé ni inscrit tant que l'alimentation n'est pas mise en marche."}
           </p>
           <p className="text-muted-fg">
-            Aujourd&apos;hui : {today.imported} importée(s) · {today.enrolled} inscrite(s) · {today.rejected} écartée(s) · Google Places : {placesReady ? `${placesUsedToday}/${settings.placesDaily} requête(s)` : "non configuré (seules les entreprises dont le site est déjà connu peuvent être complétées)"}
+            Aujourd&apos;hui : {today.imported} intégrée(s) avec mail et téléphone · {today.enrolled} inscrite(s) · {today.rejected} écartée(s) · Google Places : {placesReady ? `${placesUsedToday}/${settings.placesDaily} requête(s)` : "non configuré : aucune entreprise ne peut être vérifiée, donc aucune n'est intégrée"}
           </p>
           <p className="text-muted-fg">
             En cours : {stock.toComplete} à compléter · {stock.toDiagnose} à diagnostiquer · {stock.ready} prête(s), en attente de place · Total : {stock.enrolled} inscrite(s), {stock.rejected} écartée(s)
@@ -73,7 +73,7 @@ export function Alimentation({ settings, sizes, placesReady, placesUsedToday, to
             <label className="flex flex-col gap-1">Départements (vide = France entière)
               <input className="input min-w-[220px]" value={form.departements} onChange={(e) => setForm({ ...form, departements: e.target.value })} placeholder="75, 92, 69" maxLength={200} />
             </label>
-            <label className="flex flex-col gap-1">Imports par jour et par segment
+            <label className="flex flex-col gap-1">Entreprises intégrées par jour et par segment
               <input className="input w-28" type="number" min={0} max={200} value={form.importPerSegment} onChange={(e) => setForm({ ...form, importPerSegment: Number(e.target.value) })} />
             </label>
             <label className="flex flex-col gap-1">Requêtes Google Places par jour
@@ -113,7 +113,7 @@ export function Alimentation({ settings, sizes, placesReady, placesUsedToday, to
               <tbody>
                 {shown.map((i) => (
                   <tr key={i.id} className="tr">
-                    <td className="td font-medium"><Link className="link" href={`/entreprises/${i.companyId}`}>{i.company}</Link></td>
+                    <td className="td font-medium">{i.companyId ? <Link className="link" href={`/entreprises/${i.companyId}`}>{i.company}</Link> : i.company}</td>
                     <td className="td text-muted-fg">{i.segment}</td>
                     <td className="td">{i.stage}{i.service ? ` · ${i.service === "diagnostic" ? "Diagnostic" : "Audit"}` : ""}</td>
                     <td className="td text-muted-fg">{i.reason || "—"}</td>

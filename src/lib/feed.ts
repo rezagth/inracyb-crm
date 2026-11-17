@@ -1,13 +1,13 @@
 /**
  * Alimentation automatique des campagnes permanentes : règles pures (sans base ni réseau), donc testables.
- * Chaque jour ouvré : chercher, importer, compléter, diagnostiquer, inscrire, dans la limite de ce que les plafonds d'envoi
- * peuvent réellement traiter.
+ * Chaque jour ouvré : chercher, vérifier (adresse mail ET téléphone obligatoires avant d'entrer dans le CRM), diagnostiquer,
+ * inscrire, dans la limite de ce que les plafonds d'envoi peuvent réellement traiter.
  */
 import { SERVICE_LABEL, type ServiceKey } from "./campaign";
 import { SEGMENT_LABEL, SEGMENT_SECTORS, type Segment } from "./diagnostic-mails";
 import { SECTOR_SEARCH, type Sector } from "./prospect-search";
 
-/** a_completer : importée, coordonnées à chercher · a_diagnostiquer · a_inscrire : prête · inscrit · ecarte (reason dit pourquoi). */
+/** a_completer : importée avant la règle stricte, coordonnées à vérifier · a_diagnostiquer · a_inscrire : prête · inscrit · ecarte (reason dit pourquoi). */
 export type FeedStage = "a_completer" | "a_diagnostiquer" | "a_inscrire" | "inscrit" | "ecarte";
 export const FEED_STAGE_LABEL: Record<FeedStage, string> = { a_completer: "À compléter", a_diagnostiquer: "À diagnostiquer", a_inscrire: "Prête, en attente de place", inscrit: "Inscrite", ecarte: "Écartée" };
 
@@ -73,8 +73,28 @@ export const REJECT = {
   noSite: "Aucun site web trouvé",
   unreadable: "Site web illisible",
   noEmail: "Aucune adresse publiée sur le site",
+  noPhone: "Aucun téléphone trouvé",
+  noEmailNoPhone: "Ni adresse publiée sur le site, ni téléphone",
   noHook: "Aucun constat certain utilisable (diagnostic)",
   noDomain: "Aucun domaine à diagnostiquer",
   noFirstName: "Pas de prénom de dirigeant pour le mail",
   gone: "Entreprise supprimée du CRM",
 } as const;
+
+/** Numéro de téléphone exploitable : 9 à 15 chiffres (avec ou sans indicatif), quel que soit le format d'écriture. */
+export function isPhone(phone: string): boolean {
+  const digits = phone.replace(/\D/g, "");
+  return digits.length >= 9 && digits.length <= 15;
+}
+
+/**
+ * Règle d'entrée dans le CRM par l'alimentation : une adresse mail publiée ET un téléphone. Renvoie le motif d'écart,
+ * ou "" quand les deux sont là. L'adresse vient toujours du site de l'entreprise, jamais devinée.
+ */
+export function missingCoordinates(email: string, phone: string): string {
+  const mail = email.trim() !== "";
+  const tel = isPhone(phone);
+  if (mail && tel) return "";
+  if (!mail && !tel) return REJECT.noEmailNoPhone;
+  return mail ? REJECT.noPhone : REJECT.noEmail;
+}

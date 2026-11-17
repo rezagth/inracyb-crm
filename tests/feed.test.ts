@@ -12,7 +12,7 @@ import { eq } from "drizzle-orm";
 import * as schema from "../src/db/schema";
 import { isGenericEmail, pickPublishedEmail } from "../src/lib/contact-extract";
 import type { Dns, Probe } from "../src/lib/diagnostic";
-import { enrolSlots, nextCursor, parseDepartements, permanentName, readCursors, searchPlan } from "../src/lib/feed";
+import { enrolSlots, isPhone, missingCoordinates, nextCursor, parseDepartements, permanentName, readCursors, REJECT, searchPlan } from "../src/lib/feed";
 import type { SearchInput } from "../src/lib/prospect-search";
 import type { FeedDeps } from "../src/server/feed";
 import type { Found } from "../src/server/prospect-search";
@@ -77,7 +77,8 @@ const deps: FeedDeps = {
   probe,
 };
 const run = async (over: Partial<FeedDeps> = {}) => (await import("../src/server/feed")).runFeed({ deps: { ...deps, ...over } });
-const site = (name: string, host: string, emails: string[], phones: string[] = []) => {
+// Par défaut, le site publie un numéro : seuls les cas « sans téléphone » le retirent explicitement.
+const site = (name: string, host: string, emails: string[], phones: string[] = ["01 40 00 00 99"]) => {
   world.places[name] = { website: `https://${host}`, phone: "" };
   world.sites[host] = { emails, phones, pages: 2 };
 };
@@ -94,6 +95,8 @@ const settings = async (patch: Partial<typeof schema.feedSettings.$inferInsert>)
   await db.update(schema.feedSettings).set(patch).where(eq(schema.feedSettings.id, 1));
 };
 const clearSearch = () => { world.pages = {}; world.searches = []; };
+const skippedOf = async (name: string) => (await db.select().from(schema.feedSkipped).where(eq(schema.feedSkipped.name, name)))[0];
+const inCrm = async (name: string) => (await db.select().from(schema.companies).where(eq(schema.companies.name, name))).length > 0;
 
 before(async () => {
   await migrate(db, { migrationsFolder: "./drizzle" });
@@ -112,6 +115,16 @@ test("adresse retenue : seulement parmi celles publiées, générique d'abord, s
   assert.equal(pickPublishedEmail(["claire.durand@alpha.fr"], "alpha.fr"), "claire.durand@alpha.fr"); // publiée, donc admise, faute de générique
   assert.equal(pickPublishedEmail([], "alpha.fr"), ""); // rien de publié : rien, aucune adresse reconstituée
   assert.deepEqual(["contact@a.fr", "Accueil@a.fr", "claire.durand@a.fr", "c.durand@a.fr"].map(isGenericEmail), [true, true, false, false]);
+});
+
+test("entrée dans le CRM : adresse publiée ET téléphone obligatoires", () => {
+  assert.equal(missingCoordinates("contact@a.fr", "01 40 00 00 01"), "");
+  assert.equal(missingCoordinates("contact@a.fr", "+33 1 40 00 00 01"), "");
+  assert.equal(missingCoordinates("", "01 40 00 00 01"), REJECT.noEmail);
+  assert.equal(missingCoordinates("contact@a.fr", ""), REJECT.noPhone);
+  assert.equal(missingCoordinates("contact@a.fr", "01 40"), REJECT.noPhone); // numéro tronqué : pas un téléphone
+  assert.equal(missingCoordinates(" ", " "), REJECT.noEmailNoPhone);
+  assert.deepEqual(["0140000001", "01.40.00.00.01", "+33140000001", "1234", "", "abc"].map(isPhone), [true, true, true, false, false, false]);
 });
 
 test("départements, plan de recherche et reprise", () => {
@@ -149,7 +162,7 @@ test("interrupteur sur arrêt (état initial) : rien n'est cherché, importé ni
   n = 0;
 });
 
-test("un passage : recherche, dédoublonnage, import, enrichissement, diagnostic, inscription dans la campagne permanente", async () => {
+test("un passage : seules les entreprises avec adresse publiée ET téléphone entrent dans le CRM, puis diagnostic et inscription", async () => {
   const { setFeedEnabledAction } = await import("../src/server/actions/feed");
   assert.ok((await setFeedEnabledAction(true)).ok);
   await db.insert(schema.companies).values([{ name: "Déjà Cliente SAS", siren: "999999999" }, { name: "Homonyme Conseil" }]);
@@ -162,71 +175,81 @@ test("un passage : recherche, dédoublonnage, import, enrichissement, diagnostic
     found("Homonyme Conseil", "Numérique"), // même nom qu'une fiche saisie sans SIREN
     found("Delta ESN", "Numérique"), // aucun site trouvé
     found("Epsilon Soft", "Numérique"), // site sans adresse publiée, téléphone trouvé
+    found("Sans Tel", "Numérique"), // adresse publiée, aucun téléphone nulle part
     found("Phi Dev", "Numérique"), // site illisible
-    found("Gamma Apps", "Numérique"), // tout est en ordre côté courrier : aucun constat
+    found("Gamma Apps", "Numérique"), // complète, mais tout est en ordre côté courrier : aucun constat
     found("Hors Segment SARL", "Immobilier"), // secteur qui n'appartient pas au segment
   ];
   world.pages["Expertise comptable||1"] = [found("Iota Compta", "Expertise comptable", { director: null }), found("Omicron Compta", "Expertise comptable", { director: null })];
   site("Alpha Logiciels", "www.alpha.fr", ["claire.durand@alpha.fr", "contact@alpha.fr"], ["01 40 00 00 01"]);
+  world.places["Delta ESN"] = { website: "", phone: "01 40 00 00 05" };
   site("Epsilon Soft", "epsilon.fr", [], ["01 40 00 00 02"]);
-  world.places["Phi Dev"] = { website: "https://phi.fr", phone: "" };
+  site("Sans Tel", "sanstel.fr", ["contact@sanstel.fr"], []);
+  world.places["Phi Dev"] = { website: "https://phi.fr", phone: "01 40 00 00 06" };
   site("Gamma Apps", "gamma.fr", ["contact@gamma.fr"]);
-  site("Iota Compta", "iota.fr", ["cabinet@iota.fr"]);
+  site("Iota Compta", "iota.fr", ["cabinet@iota.fr"], []);
+  world.places["Iota Compta"].phone = "05 55 00 00 01"; // téléphone de Google, le site n'en publie pas
   site("Omicron Compta", "omicron.fr", ["jean.martin@omicron.fr"]);
   world.noDmarc = new Set(["alpha.fr", "iota.fr", "omicron.fr"]);
+  world.placeCalls = 0;
 
   const r = await run();
-  assert.deepEqual([r.ok, r.ran, r.found, r.imported, r.completed, r.diagnosed, r.enrolled, r.rejected], [true, true, 12, 7, 4, 4, 2, 4], r.message);
+  assert.deepEqual([r.ok, r.ran, r.found, r.imported, r.completed, r.diagnosed, r.enrolled, r.rejected], [true, true, 13, 4, 4, 4, 2, 6], r.message);
   assert.match(r.message, /3 déjà dans le CRM · 1 opposée\(s\) à la prospection/);
-  assert.equal((await db.select().from(schema.companies)).length, 9); // 2 existantes + 7 importées
-  assert.equal(await feedOf("Beta Conseil"), undefined);
-  assert.equal(await feedOf("Hors Segment SARL"), undefined);
+  assert.equal((await db.select().from(schema.companies)).length, 6); // 2 existantes + 4 complètes
+  assert.equal(world.placeCalls, 8); // une requête par candidat nouveau, aucune pour les doublons
   // Recherche : codes du segment, tailles ciblées, France entière.
   assert.deepEqual(world.searches.map((x) => x.sector), ["Numérique", "Expertise comptable", "Juridique", "Notariat", "Courtage"]);
   assert.deepEqual(world.searches[0].effectifs, ["02", "03", "11", "12"]);
 
-  // Alpha : importée depuis l'Annuaire, adresse générique publiée sur le site, constat DMARC, inscrite.
+  // Incomplètes : jamais dans le CRM, notées hors CRM avec le motif.
+  for (const [name, reason] of [["Delta ESN", REJECT.noSite], ["Epsilon Soft", REJECT.noEmail], ["Sans Tel", REJECT.noPhone], ["Phi Dev", "Site web illisible (site introuvable (adresse inconnue))"]]) {
+    assert.equal(await inCrm(name), false, name);
+    const k = await skippedOf(name);
+    assert.deepEqual([k?.reason, k?.skippedOn], [reason, T], name);
+  }
+  assert.equal(await inCrm("Beta Conseil"), false);
+  assert.equal(await inCrm("Hors Segment SARL"), false);
+  assert.equal(await skippedOf("Hors Segment SARL"), undefined);
+
+  // Alpha : créée avec son contact complet (adresse générique publiée sur le site, téléphone), constat DMARC, inscrite.
   const a = (await feedOf("Alpha Logiciels"))!;
   assert.deepEqual([a.c.source, a.c.siren, a.c.stage, a.c.sector], ["Recherche automatique", alpha.siren, "qualif", "Numérique"]);
   assert.match(a.c.notes, /Site web : https:\/\/www\.alpha\.fr/);
+  assert.doesNotMatch(a.c.notes, /E-mail du dirigeant à trouver/);
   assert.deepEqual([a.ct.firstName, a.ct.lastName, a.ct.role, a.ct.email, a.ct.emailSource, a.ct.phone], ["Claire", "Durand", "Présidente", "contact@alpha.fr", "site", "01 40 00 00 01"]);
   assert.deepEqual([a.f.stage, a.f.service, a.f.segment, a.f.importedOn], ["inscrit", "diagnostic", "editeurs", T]);
   const camp = (await db.select().from(schema.mailCampaigns))[0];
   assert.deepEqual([camp.name, camp.offer, camp.segment, camp.auto, camp.status], [permanentName("diagnostic", "editeurs"), "diagnostic", "editeurs", true, "active"]);
   assert.deepEqual([a.item.campaignId, a.item.status, a.item.nextStep, a.item.nextDue], [camp.id, "en_cours", 0, T]);
   assert.equal((await db.select().from(schema.mailSends)).length, 0); // l'alimentation inscrit, elle n'envoie rien elle-même
+  const created = await db.select().from(schema.events).where(eq(schema.events.companyId, a.c.id));
+  assert.ok(created.some((e) => /site alpha\.fr, e-mail publié sur le site contact@alpha\.fr, téléphone 01 40 00 00 01/.test(e.text)));
 
-  // Écartées, avec le motif.
-  assert.deepEqual([(await feedOf("Delta ESN"))!.f.stage, (await feedOf("Delta ESN"))!.f.reason], ["ecarte", "Aucun site web trouvé"]);
-  const e = (await feedOf("Epsilon Soft"))!; // enrichissement partiel : le téléphone est gardé, pas d'inscription sans adresse
-  assert.deepEqual([e.f.stage, e.f.reason, e.ct.phone, e.ct.email, e.item], ["ecarte", "Aucune adresse publiée sur le site (téléphone trouvé)", "01 40 00 00 02", "", undefined]);
+  // Complète mais sans constat : dans le CRM, écartée du diagnostic.
   assert.deepEqual([(await feedOf("Gamma Apps"))!.f.stage, (await feedOf("Gamma Apps"))!.f.reason], ["ecarte", "Aucun constat certain utilisable (diagnostic)"]);
-  // Pas de dirigeant, mais une adresse générique publiée sur le site : inscrite, le mail commencera par « Bonjour, ».
+  // Pas de dirigeant, adresse générique publiée, téléphone venu de Google : inscrite, le mail commencera par « Bonjour, ».
   const i = (await feedOf("Iota Compta"))!;
-  assert.deepEqual([i.f.stage, i.f.service, i.f.segment, i.ct.firstName, i.ct.email, i.ct.emailSource], ["inscrit", "diagnostic", "cabinets", "Standard", "cabinet@iota.fr", "site"]);
+  assert.deepEqual([i.f.stage, i.f.service, i.f.segment, i.ct.firstName, i.ct.email, i.ct.emailSource, i.ct.phone], ["inscrit", "diagnostic", "cabinets", "Standard", "cabinet@iota.fr", "site", "05 55 00 00 01"]);
   assert.deepEqual([i.item.status, i.item.nextStep], ["en_cours", 0]);
   // Pas de dirigeant et seulement une adresse nominative : écartée, le mail du diagnostic exige alors un prénom.
   const k = (await feedOf("Omicron Compta"))!;
   assert.deepEqual([k.f.stage, k.f.reason, k.ct.firstName, k.ct.email, k.item], ["ecarte", "Pas de prénom de dirigeant pour le mail", "Standard", "jean.martin@omicron.fr", undefined]);
-  // Site illisible : nouvel essai aux passages suivants.
-  const p = (await feedOf("Phi Dev"))!;
-  assert.deepEqual([p.f.stage, p.f.tries], ["a_completer", 1]);
-  assert.match(p.f.reason, /Site illisible pour l'instant/);
 
   const runs = await db.select().from(schema.feedRuns);
   assert.equal(runs.length, 1);
-  assert.deepEqual([runs[0].ok, runs[0].imported, runs[0].enrolled, runs[0].rejected], [true, 7, 2, 4]);
+  assert.deepEqual([runs[0].ok, runs[0].imported, runs[0].enrolled, runs[0].rejected], [true, 4, 2, 6]);
+  const ov = await (await import("../src/server/feed")).feedOverview();
+  assert.deepEqual([ov.today.imported, ov.today.rejected, ov.stock.rejected, ov.placesUsedToday], [4, 6, 6, 8]);
 });
 
-test("passages suivants : rien n'est importé deux fois, la campagne permanente est réutilisée, le site illisible finit écarté", async () => {
+test("passages suivants : rien n'est vérifié ni intégré deux fois, la campagne permanente est réutilisée", async () => {
+  const calls = world.placeCalls;
   const r2 = await run();
-  assert.deepEqual([r2.imported, r2.enrolled], [0, 0]);
-  assert.equal((await db.select().from(schema.companies)).length, 9);
+  assert.deepEqual([r2.imported, r2.enrolled, r2.rejected], [0, 0, 0]);
+  assert.equal(world.placeCalls, calls); // candidats écartés ou déjà dans le CRM : aucune nouvelle requête Google
+  assert.equal((await db.select().from(schema.companies)).length, 6);
   assert.equal((await db.select().from(schema.mailCampaigns)).length, 2);
-  assert.equal((await feedOf("Phi Dev"))!.f.tries, 2);
-  await run();
-  const p = (await feedOf("Phi Dev"))!;
-  assert.deepEqual([p.f.stage, p.f.reason], ["ecarte", "Site web illisible (site introuvable (adresse inconnue))"]);
   // Erreur de l'Annuaire (débit limité) : le passage continue, l'erreur est dans le journal.
   world.searchError = "L'Annuaire des Entreprises limite le débit : attends quelques secondes et réessaie.";
   const r4 = await run();
@@ -235,28 +258,35 @@ test("passages suivants : rien n'est importé deux fois, la campagne permanente 
   world.searchError = "";
 });
 
-test("plafond d'import par segment et par jour", async () => {
+test("plafond d'intégration par segment et par jour ; sans Google Places, rien n'est intégré", async () => {
   await db.delete(schema.feedItems); // le compteur du jour repart de zéro pour ce test
   clearSearch();
   await settings({ importPerSegment: 2, cursors: "{}" });
   world.pages["Numérique||1"] = [found("Import 1", "Numérique"), found("Import 2", "Numérique"), found("Import 3", "Numérique"), found("Import 4", "Numérique")];
-  const r = await run({ place: null });
+  for (const k of [1, 2, 3, 4]) site(`Import ${k}`, `import${k}.fr`, [`contact@import${k}.fr`]);
+  // Sans Google Places : ni site ni téléphone, donc aucune vérification possible et aucune recherche lancée.
+  const none = await run({ place: null });
+  assert.equal(none.imported, 0);
+  assert.equal(world.searches.length, 0);
+  assert.match(none.message, /Google Places non configuré : aucune entreprise ne peut être vérifiée/);
+  assert.equal(await inCrm("Import 1"), false);
+  assert.equal(await skippedOf("Import 1"), undefined); // rien n'est écarté à tort
+
+  const r = await run();
   assert.equal(r.imported, 2);
   assert.ok(await feedOf("Import 2"));
-  assert.equal(await feedOf("Import 3"), undefined);
-  // Sans Google Places et sans site connu : écartée tout de suite, avec la raison.
-  assert.deepEqual([(await feedOf("Import 1"))!.f.stage, (await feedOf("Import 1"))!.f.reason], ["ecarte", "Aucun site web trouvé (Google Places non configuré)"]);
-  // Le même jour : plus aucun import pour ce segment, et la page non terminée sera relue.
-  const again = await run({ place: null });
+  assert.equal(await inCrm("Import 3"), false);
+  assert.equal(await skippedOf("Import 3"), undefined); // pas vérifiée : ni dans le CRM, ni écartée
+  // Le même jour : plus aucune intégration pour ce segment, et la page non terminée sera relue.
+  const again = await run();
   assert.equal(again.imported, 0);
-  assert.equal(await feedOf("Import 3"), undefined);
   await settings({ importPerSegment: 30 });
-  const more = await run({ place: null });
+  const more = await run();
   assert.equal(more.imported, 2);
   assert.ok(await feedOf("Import 4"));
 });
 
-test("quota Google Places du jour, puis erreur de Google : les entreprises attendent, rien n'est écarté à tort", async () => {
+test("quota Google Places du jour, puis erreur de Google : les candidats attendent, rien n'est écarté à tort", async () => {
   clearSearch();
   await settings({ placesDaily: 1, placesUsed: 0, placesDay: T, cursors: "{}" });
   world.pages["Numérique||1"] = [found("Quota 1", "Numérique"), found("Quota 2", "Numérique")];
@@ -265,20 +295,19 @@ test("quota Google Places du jour, puis erreur de Google : les entreprises atten
   world.placeCalls = 0;
   const r = await run();
   assert.equal(world.placeCalls, 1);
+  assert.equal(r.imported, 1);
   assert.match(r.message, /Quota Google Places du jour atteint \(1\)/);
-  const waiting = [(await feedOf("Quota 1"))!, (await feedOf("Quota 2"))!].filter((x) => x.f.stage === "a_completer");
-  assert.equal(waiting.length, 1);
-  assert.equal(waiting[0].f.reason, "En attente : quota Google Places du jour atteint");
+  assert.deepEqual([await inCrm("Quota 1"), await inCrm("Quota 2"), await skippedOf("Quota 2")], [true, false, undefined]);
   assert.equal((await db.select().from(schema.feedSettings))[0].placesUsed, 1);
-  // Quota relevé, mais Google refuse (quota du compte) : l'entreprise attend toujours.
+  // Quota relevé, mais Google refuse (quota du compte) : le candidat attend toujours, hors du CRM et non écarté.
   await settings({ placesDaily: 30 });
   world.placeError = "Quota Google Places atteint : réessaie plus tard.";
   const r2 = await run();
   assert.match(r2.message, /Google Places : Quota Google Places atteint/);
-  assert.equal((await feedOf(waiting[0].c.name))!.f.stage, "a_completer");
+  assert.deepEqual([await inCrm("Quota 2"), await skippedOf("Quota 2")], [false, undefined]);
   world.placeError = "";
   await run();
-  assert.notEqual((await feedOf(waiting[0].c.name))!.f.stage, "a_completer");
+  assert.equal(await inCrm("Quota 2"), true);
 });
 
 test("inscriptions limitées par le plafond des prochains jours ; service en pause ; désinscription", async () => {
@@ -337,6 +366,38 @@ test("service Audit alimenté seulement s'il est activé : sans constat, l'entre
   const audit = (await db.select().from(schema.mailCampaigns)).filter((c) => c.offer === "audit");
   assert.deepEqual(audit.map((c) => [c.name, c.segment, c.auto]), [[permanentName("audit", "cabinets"), "cabinets", true]]);
   assert.ok(world.searches.every((x) => ["75", "92"].includes(x.departement) && x.effectifs.join() === "11,12")); // départements et tailles configurés
+});
+
+test("entreprises importées avant la règle : complètes, elles continuent ; incomplètes et intactes, retirées du CRM", async () => {
+  clearSearch();
+  await settings({ cursors: "{}" });
+  const legacy = async (name: string, siren: string) => {
+    const id = (await db.insert(schema.companies).values({ name, siren, sector: "Expertise comptable", source: "Recherche automatique", stage: "qualif", city: "Lyon", address: "1 rue X 69001", notes: "E-mail du dirigeant à trouver avant tout envoi." }).returning({ id: schema.companies.id }))[0].id;
+    await db.insert(schema.contacts).values({ companyId: id, firstName: "Paul", lastName: "Martin", role: "Gérant", isPrimary: true });
+    await db.insert(schema.events).values({ companyId: id, type: "create", text: "Entreprise importée par l'alimentation automatique" });
+    await db.insert(schema.feedItems).values({ companyId: id, segment: "cabinets", importedOn: T, movedOn: T });
+    return id;
+  };
+  await legacy("Ancienne Complete", "300000001");
+  await legacy("Ancienne Sans Tel", "300000002");
+  const touched = await legacy("Ancienne Suivie", "300000003");
+  await db.insert(schema.tasks).values({ title: "Rappeler", companyId: touched, dueDate: T });
+  site("Ancienne Complete", "ancienne-complete.fr", ["contact@ancienne-complete.fr"], ["04 72 00 00 01"]);
+  site("Ancienne Sans Tel", "ancienne-sanstel.fr", ["contact@ancienne-sanstel.fr"], []);
+  site("Ancienne Suivie", "ancienne-suivie.fr", [], []);
+
+  const r = await run();
+  assert.match(r.message, /1 entreprise\(s\) incomplète\(s\) retirée\(s\) du CRM/);
+  const ok = (await feedOf("Ancienne Complete"))!;
+  assert.deepEqual([ok.ct.email, ok.ct.emailSource, ok.ct.phone], ["contact@ancienne-complete.fr", "site", "04 72 00 00 01"]);
+  assert.notEqual(ok.f.stage, "a_completer");
+  // Incomplète et sans aucune trace : retirée du CRM (contacts, journal et suivi avec elle), notée hors CRM.
+  assert.equal(await inCrm("Ancienne Sans Tel"), false);
+  assert.equal((await skippedOf("Ancienne Sans Tel"))?.reason, REJECT.noPhone);
+  // Incomplète mais suivie (une tâche) : gardée, marquée écartée.
+  const kept = (await feedOf("Ancienne Suivie"))!;
+  assert.deepEqual([kept.f.stage, kept.f.reason], ["ecarte", REJECT.noEmailNoPhone]);
+  assert.equal(await skippedOf("Ancienne Suivie"), undefined);
 });
 
 test("arrêt par l'interrupteur : plus rien ne bouge, les séquences déjà commencées restent en place", async () => {
