@@ -5,6 +5,7 @@ import { entryExclusion, ENTRY_EXCLUSION_LABEL, SERVICE_LABEL, serviceOf, type S
 import { greetsWithoutName, hostOf, pickPublishedEmail, siteFromNotes } from "@/lib/contact-extract";
 import { DIAGNOSTIC_FRESH_DAYS, RULES_VERSION, usableDiagnostic, type Probe } from "@/lib/diagnostic";
 import { SEGMENTS, isSegment, segmentOfSector, type Segment } from "@/lib/diagnostic-mails";
+import { siteCandidates } from "@/lib/site-guess";
 import { enrolSlots, FEED_DEFAULTS, isPhone, MAILS_PER_PROSPECT, missingCoordinates, nextCursor, parseDepartements, permanentName, readCursors, REJECT, searchPlan, type Cursor } from "@/lib/feed";
 import { addDays, today } from "@/lib/format";
 import { EFFECTIF_CODES, type SearchInput } from "@/lib/prospect-search";
@@ -23,7 +24,7 @@ type PlaceResult = { ok: true; phone: string; website: string } | { ok: false; e
 export type FeedDeps = {
   search: (input: SearchInput) => Promise<SearchResult>;
   place: ((name: string, city: string, postalCode: string) => Promise<PlaceResult>) | null;
-  crawl: (siteUrl: string, budgetMs: number) => Promise<Crawl>;
+  crawl: (siteUrl: string, budgetMs: number, siren?: string) => Promise<Crawl>;
   probe?: Probe;
 };
 
@@ -69,6 +70,7 @@ export async function runFeed(opts: { source?: "cron" | "manuel"; budgetMs?: num
   let placesUsed = s.placesDay === t ? s.placesUsed : 0;
   const placesMax = Math.max(0, s.placesDaily);
   let placesDown = "";
+  let bySiren = 0;
   const firstStage = s.feedDiagnostic ? "a_diagnostiquer" : "a_inscrire";
 
   try {
@@ -91,7 +93,8 @@ export async function runFeed(opts: { source?: "cron" | "manuel"; budgetMs?: num
   }
   if (placesDown) notes.push(placesDown.replace(/^En attente : /, "Google Places : "));
   else if (deps.place && placesUsed >= placesMax) notes.push(`Quota Google Places du jour atteint (${placesMax})`);
-  if (!deps.place) notes.push("Google Places non configuré : aucune entreprise ne peut être vérifiée");
+  if (bySiren) notes.push(`${bySiren} site(s) trouvé(s) sans Google, prouvé(s) par le SIREN`);
+  if (!deps.place) notes.push("Google Places non configuré : seuls les sites prouvés par le SIREN sont retenus");
   sum.message = [`${sum.found} trouvée(s)`, `${sum.imported} intégrée(s) avec mail et téléphone`, `${sum.diagnosed} diagnostiquée(s)`, `${sum.enrolled} inscrite(s)`, `${sum.rejected} écartée(s)`, ...notes].join(" · ");
   try {
     await db.insert(schema.feedRuns).values({ source: opts.source ?? "cron", ok: sum.ok, found: sum.found, imported: sum.imported, completed: sum.completed, diagnosed: sum.diagnosed, enrolled: sum.enrolled, rejected: sum.rejected, message: sum.message.slice(0, 800) });
@@ -101,30 +104,48 @@ export async function runFeed(opts: { source?: "cron" | "manuel"; budgetMs?: num
   return sum;
 
   /**
-   * Site et téléphone (Google Places, dans la limite du quota du jour, sauf si le site est déjà connu), puis adresse publiée
-   * sur le site (générique d'abord, jamais devinée) et téléphone du site à défaut de celui de Google. Les deux sont obligatoires.
+   * Site, adresse et téléphone d'un candidat. Le site est d'abord cherché sans Google : adresses évidentes tirées du nom,
+   * retenues seulement si le SIREN de l'entreprise y est publié. À défaut, Google Places (dans la limite du quota) donne
+   * le site et le téléphone. L'adresse est toujours lue sur le site (générique d'abord, jamais devinée) ; adresse ET
+   * téléphone sont obligatoires.
    */
-  async function verify(name: string, city: string, address: string, knownSite: string): Promise<Verified> {
-    let site = knownSite;
-    let phone = "";
-    if (!site) {
-      if (!deps.place) return { kind: "wait", reason: "En attente : Google Places non configuré" };
-      if (placesDown) return { kind: "wait", reason: placesDown };
-      if (placesUsed >= placesMax) return { kind: "wait", reason: "En attente : quota Google Places du jour atteint" };
-      placesUsed++;
-      const p = await deps.place(name, city, cp(address));
-      if (!p.ok) {
-        placesDown = `En attente : ${p.error}`;
-        return { kind: "wait", reason: placesDown };
+  async function verify(name: string, city: string, address: string, knownSite: string, siren = "", placesCap = Infinity): Promise<Verified> {
+    if (knownSite) return fromCrawl(knownSite, await readSite(knownSite), "");
+    if (siren) {
+      const guesses = siteCandidates(name);
+      const crawls = await Promise.all(guesses.map((d) => deps.crawl("https://" + d, 8_000, siren)));
+      const hit = crawls.findIndex((c) => c.pages > 0 && c.sirenFound);
+      if (hit >= 0) {
+        bySiren++;
+        return fromCrawl("https://" + guesses[hit], crawls[hit], "");
       }
-      phone = p.phone.replace(/\s+/g, " ").trim();
-      if (p.website) site = /^https?:\/\//i.test(p.website) ? p.website : "https://" + p.website;
     }
+    if (!deps.place) return { kind: "skip", reason: `${REJECT.noSite} (SIREN absent des sites essayés, Google Places non configuré)` };
+    if (placesDown) return { kind: "wait", reason: placesDown };
+    if (placesUsed >= Math.min(placesMax, placesCap)) return { kind: "wait", reason: "En attente : quota Google Places du jour atteint" };
+    placesUsed++;
+    const p = await deps.place(name, city, cp(address));
+    if (!p.ok) {
+      placesDown = `En attente : ${p.error}`;
+      return { kind: "wait", reason: placesDown };
+    }
+    const phone = p.phone.replace(/\s+/g, " ").trim();
+    const site = p.website ? (/^https?:\/\//i.test(p.website) ? p.website : "https://" + p.website) : "";
     if (!site) return { kind: "skip", reason: REJECT.noSite };
-    const crawl = await deps.crawl(site, 9_000);
+    return fromCrawl(site, await readSite(site), phone);
+  }
+
+  /** Lecture du site trouvé ; un site trop lent a droit à un second essai, plus patient, avant d'être déclaré illisible. */
+  async function readSite(site: string) {
+    const first = await deps.crawl(site, 9_000);
+    if (first.pages || !/trop de temps/i.test(first.error ?? "")) return first;
+    return deps.crawl(site, 15_000);
+  }
+
+  function fromCrawl(site: string, crawl: Crawl, googlePhone: string): Verified {
     if (!crawl.pages) return { kind: "skip", reason: `${REJECT.unreadable}${crawl.error ? ` (${crawl.error})` : ""}` };
     const email = pickPublishedEmail(crawl.emails, hostOf(site));
-    if (!isPhone(phone)) phone = crawl.phones.find(isPhone) ?? "";
+    const phone = isPhone(googlePhone) ? googlePhone : (crawl.phones.find(isPhone) ?? "");
     const missing = missingCoordinates(email, phone);
     return missing ? { kind: "skip", reason: missing } : { kind: "ok", email, phone, site };
   }
@@ -141,7 +162,6 @@ export async function runFeed(opts: { source?: "cron" | "manuel"; budgetMs?: num
    * Une page de l'Annuaire n'est considérée comme lue que lorsque tous ses candidats ont été traités.
    */
   async function searchAndVerify() {
-    if (!deps.place) return; // sans Google Places, aucun site ni téléphone : rien ne peut être vérifié
     const rows = await db.select({ name: schema.companies.name, siren: schema.companies.siren }).from(schema.companies);
     const sirens = new Set(rows.map((r) => r.siren).filter(Boolean));
     const names = new Set(rows.map((r) => r.name.trim().toLowerCase()));
@@ -164,7 +184,7 @@ export async function runFeed(opts: { source?: "cron" | "manuel"; budgetMs?: num
       const placesCap = placesUsed + Math.ceil(Math.max(0, placesMax - placesUsed) / (SEGMENTS.length - k));
       let cur: Cursor = cursors[segment] && cursors[segment]!.combo < plan.length ? cursors[segment]! : { combo: 0, page: 1 };
       // Au plus 8 pages de l'Annuaire par segment et par passage : assez pour avancer, sans solliciter l'API à l'excès.
-      for (let pages = 0; quota > 0 && pages < 8 && left() > 15_000 && !placesDown && placesUsed < placesCap; pages++) {
+      for (let pages = 0; quota > 0 && pages < 8 && left() > 15_000; pages++) {
         const { sector, departement } = plan[cur.combo];
         const r = await deps.search({ offer: "audit", sector, departement, effectifs, query: "", page: cur.page });
         if (!r.ok) {
@@ -184,9 +204,9 @@ export async function runFeed(opts: { source?: "cron" | "manuel"; budgetMs?: num
         let done = 0;
         let stop = false;
         while (done < fresh.length && !stop) {
-          if (quota <= 0 || left() < 15_000 || placesDown || placesUsed >= placesCap) break;
-          const batch = fresh.slice(done, done + Math.min(3, quota, placesCap - placesUsed));
-          const results = await Promise.all(batch.map((c) => verify(c.name, c.city, c.address, "")));
+          if (quota <= 0 || left() < 15_000) break;
+          const batch = fresh.slice(done, done + Math.min(3, quota));
+          const results = await Promise.all(batch.map((c) => verify(c.name, c.city, c.address, "", c.siren, placesCap)));
           for (const [i, c] of batch.entries()) {
             const v = results[i];
             if (v.kind === "wait") { stop = true; continue; }
@@ -231,7 +251,7 @@ export async function runFeed(opts: { source?: "cron" | "manuel"; budgetMs?: num
       const results = await Promise.all(
         batch.map(async (it) => {
           const c = (await db.select().from(schema.companies).where(eq(schema.companies.id, it.companyId)).limit(1))[0];
-          return c ? { it, c, v: await verify(c.name, c.city, c.address, siteFromNotes(c.notes)) } : { it, c: undefined, v: undefined };
+          return c ? { it, c, v: await verify(c.name, c.city, c.address, siteFromNotes(c.notes), c.siren) } : { it, c: undefined, v: undefined };
         }),
       );
       let wait = false;

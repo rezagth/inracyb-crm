@@ -47,7 +47,8 @@ const world = {
   places: {} as Record<string, { website: string; phone: string }>,
   placeCalls: 0,
   placeError: "",
-  sites: {} as Record<string, { emails: string[]; phones: string[]; pages: number; error?: string }>,
+  sites: {} as Record<string, { emails: string[]; phones: string[]; pages: number; error?: string; siren?: string }>,
+  crawls: [] as string[], // sites lus, dans l'ordre
   noDmarc: new Set<string>(),
 };
 const rec = (...values: string[]): Dns => ({ kind: "records", values });
@@ -73,7 +74,13 @@ const deps: FeedDeps = {
     if (world.placeError) return { ok: false, error: world.placeError };
     return { ok: true, website: world.places[name]?.website ?? "", phone: world.places[name]?.phone ?? "" };
   },
-  crawl: async (site) => world.sites[new URL(site).hostname] ?? { emails: [], phones: [], pages: 0, error: "site introuvable (adresse inconnue)" },
+  crawl: async (site, _budget, siren) => {
+    const host = new URL(site).hostname;
+    world.crawls.push(host);
+    const w = world.sites[host];
+    if (!w) return { emails: [], phones: [], pages: 0, error: "site introuvable (adresse inconnue)", ...(siren ? { sirenFound: false } : {}) };
+    return { ...w, ...(siren ? { sirenFound: w.siren === siren } : {}) };
+  },
   probe,
 };
 const run = async (over: Partial<FeedDeps> = {}) => (await import("../src/server/feed")).runFeed({ deps: { ...deps, ...over } });
@@ -258,20 +265,63 @@ test("passages suivants : rien n'est vérifié ni intégré deux fois, la campag
   world.searchError = "";
 });
 
-test("plafond d'intégration par segment et par jour ; sans Google Places, rien n'est intégré", async () => {
+test("site sans Google : retenu seulement si le SIREN y est publié ; sans Google Places, les autres sont écartés", async () => {
+  await db.delete(schema.feedItems); // le compteur du jour repart de zéro pour ce test
+  clearSearch();
+  await settings({ importPerSegment: 30, cursors: "{}" });
+  const prouve = found("Prouvee Soft", "Numérique");
+  world.pages["Numérique||1"] = [prouve, found("Sans Preuve", "Numérique")];
+  world.sites["prouveesoft.fr"] = { emails: ["contact@prouveesoft.fr"], phones: ["01 40 00 00 11"], pages: 3, siren: prouve.siren };
+  world.sites["sanspreuve.fr"] = { emails: ["contact@sanspreuve.fr"], phones: ["01 40 00 00 12"], pages: 2, siren: "999999998" }; // site d'un homonyme : autre SIREN
+  world.placeCalls = 0;
+  world.crawls = [];
+  const r = await run({ place: null });
+  assert.equal(r.imported, 1);
+  assert.match(r.message, /1 site\(s\) trouvé\(s\) sans Google, prouvé\(s\) par le SIREN/);
+  assert.match(r.message, /Google Places non configuré : seuls les sites prouvés par le SIREN sont retenus/);
+  const p = (await feedOf("Prouvee Soft"))!;
+  assert.deepEqual([p.ct.email, p.ct.emailSource, p.ct.phone], ["contact@prouveesoft.fr", "site", "01 40 00 00 11"]);
+  assert.match(p.c.notes, /Site web : https:\/\/prouveesoft\.fr/);
+  // Le site de l'homonyme a bien une adresse et un téléphone, mais pas le bon SIREN : refusé, rien n'entre dans le CRM.
+  assert.equal(await inCrm("Sans Preuve"), false);
+  assert.equal((await skippedOf("Sans Preuve"))?.reason, "Aucun site web trouvé (SIREN absent des sites essayés, Google Places non configuré)");
+  assert.ok(world.crawls.includes("sanspreuve.fr") && world.crawls.includes("prouveesoft.fr"));
+
+  // Avec Google disponible : un site prouvé par le SIREN ne coûte aucune requête Google.
+  clearSearch();
+  await settings({ cursors: "{}" });
+  const deux = found("Prouvee Deux", "Numérique");
+  world.pages["Numérique||1"] = [deux];
+  world.sites["prouveedeux.com"] = { emails: ["contact@prouveedeux.com"], phones: ["01 40 00 00 13"], pages: 2, siren: deux.siren };
+  world.placeCalls = 0;
+  const r2 = await run();
+  assert.equal(r2.imported, 1);
+  assert.equal(world.placeCalls, 0);
+});
+
+test("site trop lent : un second essai plus patient avant de l'écarter", async () => {
+  clearSearch();
+  await settings({ cursors: "{}" });
+  world.pages["Numérique||1"] = [found("Lent Soft", "Numérique")];
+  world.places["Lent Soft"] = { website: "https://lent.fr", phone: "01 40 00 00 14" };
+  let tries = 0;
+  const slow: FeedDeps["crawl"] = async (site, budget, siren) => {
+    if (new URL(site).hostname !== "lent.fr") return deps.crawl(site, budget, siren);
+    tries++;
+    return tries === 1 ? { emails: [], phones: [], pages: 0, error: "le site met trop de temps à répondre" } : { emails: ["contact@lent.fr"], phones: [], pages: 2 };
+  };
+  const r = await run({ crawl: slow });
+  assert.equal(tries, 2);
+  assert.equal(r.imported, 1);
+  assert.equal(await inCrm("Lent Soft"), true);
+});
+
+test("plafond d'intégration par segment et par jour", async () => {
   await db.delete(schema.feedItems); // le compteur du jour repart de zéro pour ce test
   clearSearch();
   await settings({ importPerSegment: 2, cursors: "{}" });
   world.pages["Numérique||1"] = [found("Import 1", "Numérique"), found("Import 2", "Numérique"), found("Import 3", "Numérique"), found("Import 4", "Numérique")];
   for (const k of [1, 2, 3, 4]) site(`Import ${k}`, `import${k}.fr`, [`contact@import${k}.fr`]);
-  // Sans Google Places : ni site ni téléphone, donc aucune vérification possible et aucune recherche lancée.
-  const none = await run({ place: null });
-  assert.equal(none.imported, 0);
-  assert.equal(world.searches.length, 0);
-  assert.match(none.message, /Google Places non configuré : aucune entreprise ne peut être vérifiée/);
-  assert.equal(await inCrm("Import 1"), false);
-  assert.equal(await skippedOf("Import 1"), undefined); // rien n'est écarté à tort
-
   const r = await run();
   assert.equal(r.imported, 2);
   assert.ok(await feedOf("Import 2"));
