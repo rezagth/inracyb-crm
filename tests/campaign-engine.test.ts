@@ -10,6 +10,7 @@ import { drizzle } from "drizzle-orm/pglite";
 import { migrate } from "drizzle-orm/pglite/migrator";
 import { eq } from "drizzle-orm";
 import * as schema from "../src/db/schema";
+import { addDaysIso } from "../src/lib/campaign";
 import { scripts } from "../src/lib/prospection";
 import type { Dns, HttpInfo, Probe, TlsInfo } from "../src/lib/diagnostic";
 
@@ -212,8 +213,17 @@ test("diagnostic : relances J+3, J+7, J+14 ; constat remesuré avant l'envoi ; a
   world.dns["TXT _dmarc.diag2.fr"] = okDmarc; // diag2 a durci sa politique entre-temps
   world.tls["diag4.fr"] = { kind: "error", detail: "délai dépassé" }; // diag4 : site injoignable aujourd'hui
 
+  await db.update(schema.contacts).set({ phone: "01 42 00 00 00" }).where(eq(schema.contacts.companyId, diagIds[0]));
+  assert.equal((await db.select().from(schema.tasks).where(eq(schema.tasks.companyId, diagIds[0]))).length, 0, "aucune tâche d'appel avant le mail J+3");
   const r = await runCampaigns();
   assert.deepEqual([r.sent, r.stopped, r.errors], [1, 1, 1]);
+  // J+4 : le mail J+3 est parti, l'appel du lendemain est préparé (une seule fois, avec le constat), seulement pour diag1 qui a un téléphone.
+  const calls = await db.select().from(schema.tasks).where(eq(schema.tasks.companyId, diagIds[0]));
+  assert.equal(calls.length, 1);
+  assert.deepEqual([calls[0].title, calls[0].dueDate, calls[0].priority], ["Appeler Cabinet Diag 1 au 01 42 00 00 00 : SPF absent sur diag1.fr", addDaysIso(T, 1), "haute"]);
+  const note = (await db.select().from(schema.events).where(eq(schema.events.companyId, diagIds[0]))).find((e) => e.type === "note");
+  assert.ok(note && /phrases d'ouverture/.test(note.text) && /Je ne vends rien au téléphone/.test(note.text));
+  assert.equal((await db.select().from(schema.tasks).where(eq(schema.tasks.companyId, diagIds[1]))).length, 0);
   // diag1 : J+3 avec la piste corrective du même constat et le constat secondaire HSTS.
   const j3 = mailTo("contact@diag1.fr")[1];
   assert.equal(j3.subject, "Précision sur diag1.fr");

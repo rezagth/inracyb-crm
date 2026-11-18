@@ -5,7 +5,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { db, schema } from "@/db";
 import { requireUser } from "@/lib/auth";
-import { CAMPAIGN_OFFERS, REPLIED_REASON, entryExclusion, ENTRY_EXCLUSION_LABEL, serviceOf, type EntryExclusion } from "@/lib/campaign";
+import { CAMPAIGN_OFFERS, entryExclusion, ENTRY_EXCLUSION_LABEL, serviceOf, type EntryExclusion } from "@/lib/campaign";
 import { usableDiagnostic } from "@/lib/diagnostic";
 import { isSegment, segmentOfSector } from "@/lib/diagnostic-mails";
 import { today } from "@/lib/format";
@@ -13,6 +13,7 @@ import { prospectList } from "../queries";
 import { logEvent } from "../core";
 import { latestDiagnostics, queueDiagnostics, runDiagnostics } from "../diagnostic";
 import { crossHistories, optoutSet, recordOptout, recordRun, restDays, resumeService, runCampaigns } from "../campaigns";
+import { registerReply } from "../replies";
 
 type R = { ok: true; message: string } | { ok: false; error: string };
 const offerZ = z.enum(CAMPAIGN_OFFERS as [string, ...string[]]);
@@ -111,21 +112,11 @@ export async function stopItemAction(itemId: string, kind: string): Promise<R> {
   return replyReceived(item.companyId);
 }
 
-/** Réponse reçue : arrête toute séquence en cours de l'entreprise, le note au journal et crée une tâche prioritaire pour y répondre. */
+/** Réponse reçue : arrête toute séquence en cours de l'entreprise, le note au journal, crée une tâche prioritaire et un brouillon de réponse (logique partagée avec la lecture automatique des réponses). */
 async function replyReceived(companyId: string): Promise<R> {
-  const c = (await db.select({ name: schema.companies.name }).from(schema.companies).where(eq(schema.companies.id, companyId)).limit(1))[0];
-  if (!c) return { ok: false, error: "Entreprise introuvable." };
-  const t = today();
-  const title = `Répondre à ${c.name} (réponse à une campagne)`;
-  await db.transaction(async (tx) => {
-    await tx.update(schema.mailCampaignItems).set({ status: "arrete", stopReason: REPLIED_REASON, lastError: "" }).where(and(eq(schema.mailCampaignItems.companyId, companyId), eq(schema.mailCampaignItems.status, "en_cours")));
-    await logEvent(tx, companyId, "mail", "Réponse reçue : relances de campagne arrêtées.");
-    if (!(await tx.select({ id: schema.tasks.id }).from(schema.tasks).where(and(eq(schema.tasks.title, title), eq(schema.tasks.done, false))).limit(1))[0]) await tx.insert(schema.tasks).values({ title, companyId, dueDate: t, priority: "haute" });
-  });
-  revalidatePath("/campagnes");
-  revalidatePath(`/entreprises/${companyId}`);
-  revalidatePath("/", "layout");
-  return { ok: true, message: `Relances arrêtées. Tâche créée : répondre à ${c.name}.` };
+  const r = await registerReply(companyId, "reponse");
+  if (!r.ok) return { ok: false, error: "Entreprise introuvable." };
+  return { ok: true, message: `Relances arrêtées. Tâche créée : répondre à ${r.name}. Un brouillon de réponse est dans le journal de la fiche.` };
 }
 
 /** Bouton « Réponse reçue » de la fiche entreprise : même effet que sur la page Campagnes, sans chercher la ligne. */

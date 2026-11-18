@@ -1,7 +1,20 @@
 {
   "crons": [
-    { "path": "/api/cron/alimentation", "schedule": "0 5 * * 1-5" },
-    { "path": "/api/cron/diagnostics", "schedule": "30 6 * * 1-5" },
-    { "path": "/api/cron/campagnes", "schedule": "0 8 * * 1-5" }
+    {
+      "path": "/api/cron/alimentation",
+      "schedule": "0 5 * * 1-5"
+    },
+    {
+      "path": "/api/cron/diagnostics",
+      "schedule": "30 6 * * 1-5"
+    },
+    {
+      "path": "/api/cron/reponses",
+      "schedule": "30 7 * * 1-5"
+    },
+    {
+      "path": "/api/cron/campagnes",
+      "schedule": "0 8 * * 1-5"
+    }
   ]
 }

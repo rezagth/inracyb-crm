@@ -115,3 +115,32 @@ Prérequis côté Brevo : domaine infracyb.fr authentifié, expéditeur contact@
 - Un site trop lent a droit à un second essai, plus patient, avant d'être écarté.
 - Entreprises importées avant la phase G (encore « à compléter ») : vérifiées avec la même règle au passage suivant. Incomplètes et sans aucune trace dans le CRM (aucun échange, envoi, campagne, tâche, devis…), elles sont retirées du CRM ; sinon gardées et marquées écartées.
 - Migration : sections « Phase F » puis « Phase G » de `drizzle-manuel-diagnostic.sql`, avant de déployer.
+
+### Lecture automatique des réponses (phase H)
+
+Le CRM lit ta boîte Gmail **en lecture seule** (portée `gmail.readonly` : il ne peut ni envoyer, ni supprimer, ni modifier). Chaque jour ouvré à 7 h 30 UTC (`/api/cron/reponses`), et juste avant l'envoi de 8 h, il examine les messages reçus depuis 3 jours.
+
+- Un message d'un contact à qui tu as écrit dans les 45 derniers jours **arrête sa séquence**, crée la tâche « Répondre à… » (priorité haute) et dépose dans le journal de la fiche un **brouillon de réponse** à relire (la synthèse d'une page est à joindre).
+- « Stop », « désinscrivez-moi », « ne me contactez plus » : l'adresse est désinscrite, la séquence s'arrête.
+- « Pas intéressé », « non merci » : la séquence s'arrête et une tâche de vérification à faible priorité est créée (un refus peut cacher un besoin). Aucune désinscription.
+- Réponses automatiques (absence), rebonds, messages de tes propres adresses, expéditeurs inconnus : ignorés. Chaque message n'est traité qu'une fois.
+- Sans configuration Gmail, rien ne se passe et le bouton manuel « Réponse reçue » fonctionne comme avant, avec le même brouillon.
+
+**Mise en place (une fois, environ 15 minutes)** — l'interface de Google change : vérifie les intitulés dans la console.
+1. console.cloud.google.com : créer un projet « InfraCyb CRM », activer **Gmail API**.
+2. Écran de consentement OAuth : type « Externe », ton adresse Gmail comme utilisateur de test, portée `gmail.readonly`. **Passer l'application en « En production »** : en mode « Test », Google fait expirer le jeton au bout de 7 jours (l'écran « application non vérifiée » s'affiche alors, c'est normal pour un usage personnel).
+3. Identifiants : créer un « ID client OAuth » de type Application Web, avec l'URI de redirection `https://developers.google.com/oauthplayground`.
+4. Sur developers.google.com/oauthplayground : roue dentée, cocher « Use your own OAuth credentials », coller l'ID et le secret ; choisir la portée `https://www.googleapis.com/auth/gmail.readonly`, autoriser avec le compte qui reçoit les réponses (infracyb@gmail.com), « Exchange authorization code for tokens », copier le **Refresh token**.
+5. Dans Vercel (Settings > Environment Variables) et jamais ailleurs : `GMAIL_CLIENT_ID`, `GMAIL_CLIENT_SECRET`, `GMAIL_REFRESH_TOKEN`. Redéployer.
+6. Test : t'envoyer un mail depuis une adresse qui est un contact d'une campagne en cours, puis ouvrir `https://<ton CRM>/api/cron/reponses` avec l'en-tête `Authorization: Bearer <CRON_SECRET>` (ou attendre le déclenchement du lendemain matin).
+
+Si le jeton est révoqué ou expire, le déclenchement renvoie une erreur lisible (visible dans Vercel > Cron Jobs) ; les envois du jour partent quand même.
+
+### Tâche d'appel à J+4 (phase H)
+
+Quand le mail **J+3** d'une campagne Diagnostic part, le CRM crée la tâche « Appeler <entreprise> au <téléphone> : <constat> sur <domaine> » pour le lendemain (priorité haute) et note dans le journal de la fiche les phrases d'ouverture de l'appel. Le constat est repris mot pour mot de la phrase validée. Pas de téléphone utilisable (9 chiffres au moins) : aucune tâche. Le canevas d'appel (les phrases autour du constat) est dans `src/lib/call-task.ts` : à relire et corriger par toi.
+
+### Pack « Courrier sécurisé » (phase H)
+
+`drizzle-manuel-pack-courrier.sql` ajoute la prestation au catalogue (390 € HT de départ, à valider ; rejouable sans danger). Aucune table n'est modifiée : **aucune autre migration n'est nécessaire pour la phase H**.
+

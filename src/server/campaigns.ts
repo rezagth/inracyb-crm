@@ -31,7 +31,8 @@ import {
 } from "@/lib/campaign";
 import { siteFromNotes } from "@/lib/contact-extract";
 import { diagnose, parseChecks, targetsOf, type Check, type Probe } from "@/lib/diagnostic";
-import { buildDiagnosticMail, hookVariantOf, isHookVariant, isSegment, type Segment } from "@/lib/diagnostic-mails";
+import { buildCallTask } from "@/lib/call-task";
+import { buildDiagnosticMail, HOOK_TEXT, hookVariantOf, isHookVariant, isSegment, type Segment } from "@/lib/diagnostic-mails";
 import { today } from "@/lib/format";
 import { OFFER_KIT, scripts, type OfferKey, type Profile, type Prospect } from "@/lib/prospection";
 import { brevoConfig, sendBrevoMail } from "./brevo";
@@ -312,6 +313,24 @@ export async function runCampaigns(opts: { campaignId?: string; budgetMs?: numbe
           await logEvent(tx, c.id, "mail", `Mail ${STEP_LABELS[step]} envoyé par la campagne « ${campaign.name} » (${offerLabel(offer)}) : « ${subject} »`);
           if (c.stage !== "perdu" && stageRank(c.stage) < stageRank("contacte")) await tx.update(schema.companies).set({ stage: "contacte" }).where(eq(schema.companies.id, c.id));
           await tx.update(schema.companies).set({ lastContact: sentOn }).where(eq(schema.companies.id, c.id));
+          // Diagnostic : le mail J+3 est parti, le CRM prépare l'appel du lendemain (J+4) avec le constat et les phrases d'ouverture.
+          if (service === "diagnostic" && step === 1) {
+            const h = item.hook || hook;
+            const target = targetsOf(email, siteFromNotes(c.notes));
+            const call = buildCallTask({
+              company: c.name,
+              contactName: /^standard$/i.test(ct?.firstName ?? "") ? "" : [ct?.firstName, ct?.lastName].filter(Boolean).join(" "),
+              phone: ct?.phone ?? "",
+              hook: h,
+              domain: isHookVariant(h) && HOOK_TEXT[h].family === "B" ? target.webHost : target.mailDomain,
+              me: profile.me,
+              sentOn,
+            });
+            if (call && !(await tx.select({ id: schema.tasks.id }).from(schema.tasks).where(and(eq(schema.tasks.title, call.title), eq(schema.tasks.done, false))).limit(1))[0]) {
+              await tx.insert(schema.tasks).values({ title: call.title, companyId: c.id, dueDate: call.dueDate, priority: call.priority });
+              await logEvent(tx, c.id, "note", `Appel prévu le ${call.dueDate.split("-").reverse().join("/")} : phrases d'ouverture\n\n${call.opening}`);
+            }
+          }
         }
         await tx
           .update(schema.mailCampaignItems)

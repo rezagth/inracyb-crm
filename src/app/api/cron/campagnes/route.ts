@@ -3,6 +3,7 @@ import { isFrenchHoliday } from "@/lib/campaign";
 import { today } from "@/lib/format";
 import { cronAuthorized } from "@/server/cron-auth";
 import { recordRun, runCampaigns, runFailed, type RunSummary } from "@/server/campaigns";
+import { processReplies } from "@/server/replies";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -11,6 +12,8 @@ export const dynamic = "force-dynamic";
 /** Déclenché chaque jour par Vercel Cron (vercel.json). Vercel envoie « Authorization: Bearer <CRON_SECRET> ». Sans CRON_SECRET, la route refuse tout. */
 export async function GET(req: NextRequest) {
   if (!cronAuthorized(req.headers.get("authorization"))) return NextResponse.json({ error: "Non autorisé" }, { status: 401 });
+  // Les réponses reçues arrêtent leur séquence AVANT l'envoi du jour (une erreur de lecture ne bloque pas les envois).
+  await processReplies().catch(() => undefined);
   // Jour férié : aucun envoi automatique, les mails dus partent au prochain jour ouvré (l'envoi manuel reste possible).
   const r: RunSummary = isFrenchHoliday(today()) ? { ok: true, sent: 0, stopped: 0, errors: 0, waiting: 0, message: "Jour férié : aucun envoi automatique aujourd'hui." } : await runCampaigns();
   await recordRun("cron", r);

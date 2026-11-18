@@ -20,6 +20,7 @@ const CATALOG = [
   { name: "Audit cyber forfaitaire — PME", offer: "Audit", unit: "forfait", pu: 9600, description: "Jusqu'à 50 postes, rapport et plan d'action" },
   { name: "RSSI externalisé — abonnement", offer: "CISOaaS", unit: "mois", pu: 1033, description: "Pilotage sécurité, comité mensuel, support" },
   { name: "Journée de conseil cybersécurité", offer: "CISOaaS", unit: "jour", pu: 650, description: "Intervention ponctuelle" },
+  { name: "Pack Courrier sécurisé — SPF, DKIM, DMARC", offer: "Audit", unit: "forfait", pu: 390, description: "SPF et DKIM publiés, DMARC en surveillance, rapport à J+30, passage progressif à une politique plus stricte (prix de départ à valider)" },
   { name: "Mise en place de la double authentification", offer: "CISOaaS", unit: "forfait", pu: 450, description: "Messageries et comptes critiques" },
   { name: "Sensibilisation des équipes au phishing", offer: "CISOaaS", unit: "forfait", pu: 650, description: "Demi-journée, support remis" },
   { name: "Automatisation IA — cadrage et première tâche", offer: "IA", unit: "forfait", pu: 1500, description: "Une tâche automatisée et testée" },
