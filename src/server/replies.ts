@@ -44,6 +44,29 @@ export async function registerReply(companyId: string, kind: "reponse" | "refus"
   return { ok: true, name: c.name };
 }
 
+/**
+ * Annule une réponse enregistrée par erreur (bouton « Réponse reçue » cliqué à tort) : la séquence reprend là où elle s'était
+ * arrêtée, au plus tôt aujourd'hui, et les tâches « Répondre à… » ou « Vérifier la réponse… » encore ouvertes sont closes.
+ */
+export async function undoReply(companyId: string): Promise<{ ok: true; name: string } | { ok: false; error: string }> {
+  const c = (await db.select({ name: schema.companies.name }).from(schema.companies).where(eq(schema.companies.id, companyId)).limit(1))[0];
+  if (!c) return { ok: false, error: "Entreprise introuvable." };
+  const items = schema.mailCampaignItems;
+  if ((await db.select({ id: items.id }).from(items).where(and(eq(items.companyId, companyId), eq(items.status, "en_cours"))).limit(1))[0]) return { ok: false, error: "Une séquence est déjà en cours pour cette entreprise." };
+  const stopped = (await db.select().from(items).where(and(eq(items.companyId, companyId), eq(items.status, "arrete"), eq(items.stopReason, REPLIED_REASON))).orderBy(desc(items.createdAt)).limit(1))[0];
+  if (!stopped) return { ok: false, error: "Aucune réponse à annuler pour cette entreprise." };
+  const t = today();
+  await db.transaction(async (tx) => {
+    await tx.update(items).set({ status: "en_cours", stopReason: "", lastError: "", nextDue: stopped.nextDue > t ? stopped.nextDue : t }).where(eq(items.id, stopped.id));
+    await logEvent(tx, companyId, "mail", "Réponse annulée (marquée par erreur) : relances de campagne reprises.");
+    await tx.update(schema.tasks).set({ done: true }).where(and(eq(schema.tasks.companyId, companyId), eq(schema.tasks.done, false), inArray(schema.tasks.title, [`Répondre à ${c.name} (réponse à une campagne)`, `Vérifier la réponse de ${c.name} (refus apparent)`])));
+  });
+  revalidatePath("/campagnes");
+  revalidatePath(`/entreprises/${companyId}`);
+  revalidatePath("/", "layout");
+  return { ok: true, name: c.name };
+}
+
 export type ReplyRun = { ok: boolean; checked: number; replies: number; refus: number; optouts: number; ignored: number; message: string };
 
 /** Adresses de l'utilisateur : ses propres messages ne sont jamais des réponses de prospects. */

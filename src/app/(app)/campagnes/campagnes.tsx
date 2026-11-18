@@ -2,12 +2,12 @@
 
 import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
-import { createCampaignAction, resumeServiceAction, runCampaignsNowAction, setCampaignStatusAction, stopItemAction } from "@/server/actions/campaigns";
+import { createCampaignAction, resumeServiceAction, runCampaignsNowAction, setCampaignStatusAction, stopItemAction, undoReplyAction } from "@/server/actions/campaigns";
 import { Card } from "@/components/ui";
 import { Icon } from "@/components/icon";
 import { useToast } from "@/components/mod/toast";
 import { OFFER_KIT, type OfferKey } from "@/lib/prospection";
-import { SERVICE_KEYS, SERVICE_LABEL, STEP_LABELS, type ServiceKey } from "@/lib/campaign";
+import { REPLIED_REASON, SERVICE_KEYS, SERVICE_LABEL, STEP_LABELS, type ServiceKey } from "@/lib/campaign";
 import { fd } from "@/lib/format";
 import { Diagnostics, type DiagCandidate, type DiagProspect, type DiagRow } from "./diagnostics";
 import { SEGMENT_LABEL, isSegment } from "@/lib/diagnostic-mails";
@@ -214,6 +214,9 @@ export function Campagnes({ prospects, offers, ready, urlOk, dailyLimit, sentTod
                           <td className="td num text-muted-fg">{i.status === "en_cours" ? `${STEP_LABELS[i.step]} · ${fd(i.due)}` : "—"}</td>
                           <td className="td text-muted-fg">{i.status === "en_cours" ? (i.error ? `Erreur : ${i.error}` : "En cours") : i.reason || (i.status === "termine" ? "Terminée" : "Arrêtée")}</td>
                           <td className="td text-right">
+                            {i.status === "arrete" && i.reason === REPLIED_REASON && (
+                              <button type="button" className="btn btn-sec btn-sm" disabled={pending} onClick={() => window.confirm(`Annuler la réponse de ${i.company} ? Ses relances reprendront.`) && run(() => undoReplyAction(i.id))}>Annuler la réponse</button>
+                            )}
                             {i.status === "en_cours" && (
                               <>
                                 <button type="button" className="btn btn-sec btn-sm" disabled={pending} onClick={() => run(() => stopItemAction(i.id, "reponse"))}>Réponse reçue</button>{" "}

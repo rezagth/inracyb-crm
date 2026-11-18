@@ -126,3 +126,27 @@ test("le bouton manuel et la lecture automatique partagent la même logique", as
   assert.equal((await item("F")).stopReason, REPLIED_REASON);
   assert.equal((await registerReply("inexistante", "reponse")).ok, false);
 });
+
+test("annuler une réponse marquée par erreur : la séquence reprend et la tâche est close", async () => {
+  const { registerReply, undoReply } = await import("../src/server/replies");
+  await company("H", "marie@theta.fr");
+  await registerReply(ids.H, "reponse");
+  assert.equal((await item("H")).status, "arrete");
+  assert.equal((await tasksOf("H"))[0].done, false);
+  const r = await undoReply(ids.H);
+  assert.equal(r.ok, true);
+  const it = await item("H");
+  assert.equal(it.status, "en_cours");
+  assert.equal(it.stopReason, "");
+  assert.ok(it.nextDue >= T);
+  assert.equal((await tasksOf("H"))[0].done, true);
+  const again = await undoReply(ids.H);
+  assert.equal(again.ok, false); // déjà en cours : rien à annuler
+});
+
+test("annuler sans réponse enregistrée : refus", async () => {
+  const { undoReply } = await import("../src/server/replies");
+  await company("I", "marie@iota.fr", { sequence: false });
+  const r = await undoReply(ids.I);
+  assert.equal(r.ok, false);
+});

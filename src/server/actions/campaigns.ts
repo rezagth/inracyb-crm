@@ -13,7 +13,7 @@ import { prospectList } from "../queries";
 import { logEvent } from "../core";
 import { latestDiagnostics, queueDiagnostics, runDiagnostics } from "../diagnostic";
 import { crossHistories, optoutSet, recordOptout, recordRun, restDays, resumeService, runCampaigns } from "../campaigns";
-import { registerReply } from "../replies";
+import { registerReply, undoReply } from "../replies";
 
 type R = { ok: true; message: string } | { ok: false; error: string };
 const offerZ = z.enum(CAMPAIGN_OFFERS as [string, ...string[]]);
@@ -117,6 +117,15 @@ async function replyReceived(companyId: string): Promise<R> {
   const r = await registerReply(companyId, "reponse");
   if (!r.ok) return { ok: false, error: "Entreprise introuvable." };
   return { ok: true, message: `Relances arrêtées. Tâche créée : répondre à ${r.name}. Un brouillon de réponse est dans le journal de la fiche.` };
+}
+
+/** Annule une réponse marquée par erreur : la séquence de l'entreprise reprend. */
+export async function undoReplyAction(itemId: string): Promise<R> {
+  await requireUser();
+  const item = (await db.select().from(schema.mailCampaignItems).where(eq(schema.mailCampaignItems.id, itemId)).limit(1))[0];
+  if (!item) return { ok: false, error: "Entrée introuvable." };
+  const r = await undoReply(item.companyId);
+  return r.ok ? { ok: true, message: `Réponse annulée : les relances de ${r.name} reprennent.` } : { ok: false, error: r.error };
 }
 
 /** Bouton « Réponse reçue » de la fiche entreprise : même effet que sur la page Campagnes, sans chercher la ligne. */
