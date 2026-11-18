@@ -144,3 +144,15 @@ Quand le mail **J+3** d'une campagne Diagnostic part, le CRM crée la tâche « 
 
 `drizzle-manuel-pack-courrier.sql` ajoute la prestation au catalogue (390 € HT de départ, à valider ; rejouable sans danger). Aucune table n'est modifiée : **aucune autre migration n'est nécessaire pour la phase H**.
 
+
+## Prix du Pack Courrier et prix pilote
+
+Étude de marché du 18/11/2026 (prestataires installés : 390 à 650 € HT). Prix public : 390 € HT. Prix pilote : 290 € HT pour les 3 premiers clients, contre un témoignage écrit. Les montants sont dans `src/lib/pricing.ts`. Aucune facture avant l'immatriculation.
+
+## Rapport hebdomadaire automatique
+
+Chaque lundi à 7h15 UTC, `/api/cron/rapport` envoie par Brevo le bilan de la semaine (nouvelles entreprises, bilan par service et segment, alertes, actions). Destinataire : `REPORT_TO_EMAIL`, sinon l'e-mail du profil du CRM. Pour le tester : dans Vercel, Settings, Cron Jobs, bouton Run sur `/api/cron/rapport`.
+
+## Campagne prescripteurs (textes prêts, envoi pas encore branché)
+
+Textes dans `textes-campagne-prescripteurs.md`, code dans `src/lib/prescripteur-mails.ts`. Experts-comptables, avocats et notaires : jamais de commission (décret n° 2012-432, art. 162). Courtiers et prestataires IT : 15 % du HT encaissé, accord écrit. Le moteur de campagnes n'envoie pas encore cette séquence : à brancher après validation des textes. Aucun accord de commission avant l'immatriculation.
