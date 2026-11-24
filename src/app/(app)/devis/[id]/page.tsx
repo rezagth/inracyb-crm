@@ -8,6 +8,7 @@ import { eur, fd } from "@/lib/format";
 import { Badge, Card, PageHeader } from "@/components/ui";
 import { DocSheet } from "@/components/documents/doc-sheet";
 import { PrintButton } from "@/components/documents/print-button";
+import { PdfButton } from "@/components/documents/pdf-button";
 import { QuoteActions } from "./actions-panel";
 
 export const metadata = { title: "Devis" };
@@ -40,6 +41,7 @@ export default async function QuotePage({ params }: { params: Promise<{ id: stri
         actions={
           <span className="flex gap-2">
             <Link className="btn btn-sec" href={`/devis/${q.id}/contrat`}>Contrat de mission</Link>
+            {!isDraftNumber(q.number) && <PdfButton kind="devis" id={q.id} />}
             <PrintButton />
           </span>
         }

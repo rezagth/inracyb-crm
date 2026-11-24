@@ -9,6 +9,7 @@ import { centsToInput, daysBetween, eur, fd, fdt, today } from "@/lib/format";
 import { Badge, Card, PageHeader } from "@/components/ui";
 import { DocSheet } from "@/components/documents/doc-sheet";
 import { PrintButton } from "@/components/documents/print-button";
+import { PdfButton } from "@/components/documents/pdf-button";
 import { InvoiceActions } from "./actions-panel";
 
 export const metadata = { title: "Facture" };
@@ -51,7 +52,12 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
             {iv.display.key === "retard" && <span className="text-ko">échue depuis {late} jour{late > 1 ? "s" : ""}</span>}
           </span>
         }
-        actions={<PrintButton />}
+        actions={
+          <span className="flex gap-2">
+            {!isDraftNumber(iv.number) && <PdfButton kind="facture" id={iv.id} />}
+            <PrintButton />
+          </span>
+        }
       />
       <div className="grid gap-4 xl:grid-cols-[1fr_320px]">
         <DocSheet
