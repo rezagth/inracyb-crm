@@ -45,9 +45,11 @@ Au premier lancement, un **démarrage accompagné** (6 étapes) règle ton profi
 | --- | --- |
 | Pilotage | Tableau de bord (avec « Bien démarrer »), Rapports (métrique, regroupement, export CSV, vues enregistrées), Rentabilité (revenu horaire par client, prévisionnel), Activité |
 | Commercial | Prospection (file d'appels, scripts d'appel, séquences de mails J0 à J+14, objections, appel guidé), Pipeline, Entreprises (fiche complète avec suivi client), Contacts, Appels, Rendez-vous (agenda + export .ics), Devis, Partenaires |
-| Clients | Clients, Contrats (MRR, facturation du mois), Missions, Audits (24 points, score, rapport, plan généré), Plans d'action (compte rendu de comité), Incidents (alerte CNIL 72 h), Temps, Support |
+| Clients | Clients, Contrats (MRR, facturation du mois), Missions, Temps, Support |
 | Finance | Factures (numérotation continue, paiements, relances, avoirs), Catalogue, Dépenses, Trésorerie (plafond, TVA, URSSAF, prévision), livre des recettes |
 | Entreprise | Tâches, Documents, Base de connaissances, Marketing, Conformité (obligations + registre RGPD), Intégrations (Cal, agenda, banque CSV avec rapprochement, paiement, exports comptables), Automatisations, Paramètres |
+
+**Audits, plans d'action, comités et incidents se suivent dans StratCyber** (portail client) : la fiche entreprise a un bouton « Ouvrir dans StratCyber » (il faut `STRATCYBER_URL` dans `.env`). Les anciennes pages Audits, Plans d'action et Incidents du CRM ne sont plus dans le menu mais restent accessibles par leur adresse (`/audits`, `/plans`, `/incidents`) pour consulter les données déjà saisies.
 
 Les favoris (étoile en haut à droite) gardent tes vues filtrées dans la barre latérale ; chaque groupe de la barre se replie.
 

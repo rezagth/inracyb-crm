@@ -5,6 +5,7 @@ import { companyOptions } from "@/server/queries";
 import { CONTROLS, auditScore } from "@/lib/audit";
 import { fd } from "@/lib/format";
 import { PageHeader } from "@/components/ui";
+import { MovedToStratcyber } from "@/components/moved-to-stratcyber";
 import { BarCell, Cell, LinkCell, ModTable, ModTip, PillCell, Row, Stats, match } from "@/components/mod/layout";
 import { FormButton } from "@/components/mod/record-dialog";
 
@@ -20,6 +21,7 @@ export default async function AuditsPage({ searchParams }: { searchParams: Promi
     <>
       <PageHeader title="Audits" actions={<FormButton form="audit" label="Nouvel audit" primary companies={(await companyOptions())} redirectTo="/audits/{id}" />} />
       <div className="flex flex-col gap-4">
+        <MovedToStratcyber />
         <ModTip>Ton questionnaire d&apos;audit en {CONTROLS.length} points de contrôle : tu coches sur place, le score se calcule, le plan d&apos;action et le rapport se génèrent en un clic.</ModTip>
         <Stats
           items={[

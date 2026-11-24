@@ -4,6 +4,7 @@ import { companyOptions } from "@/server/queries";
 import { INCIDENT_STATUS } from "@/lib/forms";
 import { fd } from "@/lib/format";
 import { PageHeader } from "@/components/ui";
+import { MovedToStratcyber } from "@/components/moved-to-stratcyber";
 import { Cell, LinkCell, ModTable, ModTip, PillCell, Row, Stats, match } from "@/components/mod/layout";
 import { FormButton } from "@/components/mod/record-dialog";
 import { PatchSelect } from "@/components/mod/cells";
@@ -21,6 +22,7 @@ export default async function IncidentsPage({ searchParams }: { searchParams: Pr
     <>
       <PageHeader title="Incidents" actions={<FormButton form="incident" label="Déclarer un incident" primary companies={(await companyOptions())} />} />
       <div className="flex flex-col gap-4">
+        <MovedToStratcyber />
         <ModTip>
           Le registre des incidents de tes clients. Si des données personnelles sont touchées et qu&apos;il existe un risque pour les personnes, le client (responsable de traitement) doit notifier la CNIL dans les 72 heures (article 33 du RGPD) : aide-le à le faire. Ta procédure de réponse est dans la Base de connaissances.
         </ModTip>

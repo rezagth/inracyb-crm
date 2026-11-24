@@ -37,10 +37,7 @@ export function getCompany(id: string) {
       meetings: { orderBy: [desc(schema.meetings.date)], limit: 20 },
       contracts: true,
       missions: { with: { times: { columns: { hours: true } } } },
-      securityActions: true,
       tickets: true,
-      incidents: true,
-      audits: true,
     },
   });
 }

@@ -7,6 +7,7 @@ import { getCompany, invoiceTotals } from "@/server/queries";
 import { updateCompanyAction } from "@/server/actions/companies";
 import { OFFERS, QUOTE_STATUS, statusOfStage } from "@/lib/constants";
 import { invoiceDisplayStatus } from "@/lib/billing";
+import { stratcyberDossierUrl } from "@/lib/stratcyber-link";
 import { eur, fd, fdt, initials, today } from "@/lib/format";
 import { Avatar, Badge, Card, EmptyState, PageHeader, toneFor } from "@/components/ui";
 import { Icon, type IconName } from "@/components/icon";
@@ -37,6 +38,7 @@ export default async function CompanyPage({ params, searchParams }: { params: Pr
   const st = statusOfStage(c.stage);
   const primary = c.contacts.find((x) => x.isPrimary) ?? c.contacts[0];
   const t = today();
+  const stratcyberUrl = stratcyberDossierUrl(process.env.STRATCYBER_URL, c.id);
   const inSequence = !!(await db.select({ id: schema.mailCampaignItems.id }).from(schema.mailCampaignItems).where(and(eq(schema.mailCampaignItems.companyId, c.id), eq(schema.mailCampaignItems.status, "en_cours"))).limit(1))[0];
 
   return (
@@ -256,16 +258,20 @@ export default async function CompanyPage({ params, searchParams }: { params: Pr
               </ul>
             )}
           </Card>
-          <Card title="Sécurité" actions={<Link href={`/plans?co=${c.id}`} className="btn btn-sec btn-sm">Plan d&apos;action</Link>}>
+          <Card
+            title="Sécurité"
+            actions={
+              stratcyberUrl ? (
+                <a href={stratcyberUrl} target="_blank" rel="noopener noreferrer" className="btn btn-sec btn-sm">Ouvrir dans StratCyber</a>
+              ) : undefined
+            }
+          >
             <div className="flex flex-col gap-2 px-5 py-4 text-[13px]">
-              <div className="flex justify-between"><span className="text-muted-fg">Plan d&apos;action</span><span className="num">{c.securityActions.filter((a) => a.status === "fait").length} / {c.securityActions.length} actions faites</span></div>
-              <div className="flex justify-between"><span className="text-muted-fg">Audits</span><span className="num">{c.audits.length}</span></div>
+              <p className="text-muted-fg">
+                Audits, plan d&apos;action, comités et incidents se suivent dans StratCyber.
+                {!stratcyberUrl && " Renseigne STRATCYBER_URL dans la configuration pour afficher le lien vers le dossier du client."}
+              </p>
               <div className="flex justify-between"><span className="text-muted-fg">Tickets ouverts</span><span className="num">{c.tickets.filter((x) => x.status !== "resolu").length}</span></div>
-              <div className="flex justify-between"><span className="text-muted-fg">Incidents ouverts</span><span className="num">{c.incidents.filter((x) => x.status !== "clos").length}</span></div>
-              <div className="mt-2 flex flex-wrap gap-2">
-                <Link href={`/plans/comite?co=${c.id}`} className="btn btn-sec btn-sm">Compte rendu de comité</Link>
-                {c.audits[0] && <Link href={`/audits/${c.audits[0].id}`} className="btn btn-ghost btn-sm">Dernier audit</Link>}
-              </div>
             </div>
           </Card>
         </div>

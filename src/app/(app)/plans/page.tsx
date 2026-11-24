@@ -4,6 +4,7 @@ import { companyOptions } from "@/server/queries";
 import { ACTION_STATUS } from "@/lib/forms";
 import { fd, today } from "@/lib/format";
 import { PageHeader } from "@/components/ui";
+import { MovedToStratcyber } from "@/components/moved-to-stratcyber";
 import { Cell, LinkCell, ModTable, ModTip, Panel, Panels, PillCell, Row, Stats, match } from "@/components/mod/layout";
 import { FormButton } from "@/components/mod/record-dialog";
 import { DeleteButton, PatchSelect } from "@/components/mod/cells";
@@ -32,6 +33,7 @@ export default async function PlansPage({ searchParams }: { searchParams: Promis
     <>
       <PageHeader title="Plans d'action" />
       <div className="flex flex-col gap-4">
+        <MovedToStratcyber />
         <ModTip>Les recommandations de tes audits et le plan de sécurité de chaque client RSSI, action par action. C&apos;est ce que tu présentes en comité mensuel.</ModTip>
         <Stats
           items={[

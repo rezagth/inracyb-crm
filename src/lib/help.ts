@@ -104,6 +104,7 @@ export const HELP: Record<string, string[]> = {
   "Archive une prestation au lieu de la supprimer : tes anciennes factures restent cohérentes."
  ],
  "plans": [
+  "Ce suivi se fait désormais dans StratCyber (bouton « Ouvrir dans StratCyber » sur la fiche entreprise) ; cette page garde les données déjà saisies.",
   "Le plan de sécurité de chaque client, action par action, avec un responsable et une échéance.",
   "C'est la base de tes comités mensuels en RSSI externalisé et du suivi après un audit."
  ],
@@ -112,11 +113,13 @@ export const HELP: Record<string, string[]> = {
   "Clique une entreprise pour ouvrir sa fiche."
  ],
  "audits": [
+  "Ce suivi se fait désormais dans StratCyber (bouton « Ouvrir dans StratCyber » sur la fiche entreprise) ; cette page garde les données déjà saisies.",
   "Démarre un audit, puis réponds point par point : Oui, Partiel, Non ou N/A.",
   "« Générer le plan d'action » crée une action par point à corriger, avec sa priorité et une échéance.",
   "« Voir le rapport » produit le rapport à remettre au client (copie ou impression en PDF)."
  ],
  "incidents": [
+  "Ce suivi se fait désormais dans StratCyber (bouton « Ouvrir dans StratCyber » sur la fiche entreprise) ; cette page garde les données déjà saisies.",
   "Déclare chaque incident d'un client : une tâche de suivi est créée.",
   "Si des données personnelles sont touchées, aide le client à évaluer la notification CNIL (72 h).",
   "Ta procédure de réponse à incident est dans la Base de connaissances."

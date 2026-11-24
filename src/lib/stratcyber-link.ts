@@ -29,3 +29,19 @@ export function paymentStatusOf(
   if (contractStatuses.length > 0 && !contractStatuses.includes("actif")) return { status: "resilie", overdueDays: null };
   return { status: "a_jour", overdueDays: null };
 }
+
+/**
+ * Adresse du dossier d'un client dans StratCyber (page de passage par identifiant CRM).
+ * `null` si STRATCYBER_URL n'est pas renseignée ou n'est pas une adresse http(s).
+ */
+export function stratcyberDossierUrl(base: string | undefined, companyId: string): string | null {
+  const b = (base ?? "").trim().replace(/\/+$/, "");
+  if (!/^https?:\/\/[^\s/]+/i.test(b)) return null;
+  return `${b}/dashboard/organizations/crm/${encodeURIComponent(companyId)}`;
+}
+
+/** Adresse d'accueil de StratCyber, ou `null` si STRATCYBER_URL n'est pas une adresse http(s). */
+export function stratcyberHome(base: string | undefined): string | null {
+  const b = (base ?? "").trim().replace(/\/+$/, "");
+  return /^https?:\/\/[^\s/]+/i.test(b) ? `${b}/dashboard/organizations` : null;
+}
