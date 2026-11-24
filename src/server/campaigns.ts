@@ -20,8 +20,9 @@ import {
   runFailed,
   SERVICE_KEYS,
   SERVICE_LABEL,
+  sequenceDays,
   serviceOf,
-  STEP_LABELS,
+  stepLabel,
   withUnsubscribeFooter,
   type CampaignOffer,
   type CrossHistory,
@@ -35,6 +36,7 @@ import { buildCallTask } from "@/lib/call-task";
 import { buildDiagnosticMail, HOOK_TEXT, hookVariantOf, isHookVariant, isSegment, type Segment } from "@/lib/diagnostic-mails";
 import { today } from "@/lib/format";
 import { OFFER_KIT, scripts, type OfferKey, type Profile, type Prospect } from "@/lib/prospection";
+import { composePrescriberMail, prescriberCallTask, prescriberKindOf, prescriberSectors } from "@/lib/prescripteur-mails";
 import { brevoConfig, sendBrevoMail } from "./brevo";
 import { publicProbe } from "./diagnostic";
 import { logEvent } from "./core";
@@ -74,6 +76,16 @@ export async function optoutSet(): Promise<Set<string>> {
   return new Set((await db.select({ email: schema.mailOptouts.email }).from(schema.mailOptouts)).map((r) => r.email));
 }
 
+/** Courtiers (texte partenaire, commission) : seulement avec PRESCRIPTEUR_PARTENAIRES=1, après l'immatriculation et la relecture de l'accord écrit. */
+export function prescriberPartnersEnabled(): boolean {
+  return (process.env.PRESCRIPTEUR_PARTENAIRES || "").trim() === "1";
+}
+
+/** Secteurs réservés à la campagne prescripteurs (jamais prospectés comme clients). */
+export function reservedSectors(): string[] {
+  return prescriberSectors(prescriberPartnersEnabled());
+}
+
 /** Délai de repos (jours) avant de passer d'un service à l'autre : 30 par défaut, CAMPAIGN_REST_DAYS (facultative) le remplace. */
 export function restDays(): number {
   return parseLimit(process.env.CAMPAIGN_REST_DAYS, REST_DAYS_DEFAULT, 365);
@@ -92,6 +104,7 @@ export async function getDailyState(t = today()): Promise<DailyState> {
     firstDiagnosticSendOn: first,
     auditLimit: brevoConfig().dailyLimit,
     diagnosticTarget: parseLimit(process.env.MAIL_DAILY_LIMIT_DIAGNOSTIC, DEFAULT_DAILY_LIMIT.diagnostic),
+    prescriberLimit: parseLimit(process.env.MAIL_DAILY_LIMIT_PRESCRIPTEUR, DEFAULT_DAILY_LIMIT.prescripteur),
   });
 }
 
@@ -240,7 +253,7 @@ export async function runCampaigns(opts: { campaignId?: string; budgetMs?: numbe
   const started = Date.now();
   const budget = opts.budgetMs ?? 45_000;
   const state = await getDailyState(t);
-  const remaining: Record<ServiceKey, number> = { audit: state.audit.remaining, diagnostic: state.diagnostic.remaining };
+  const remaining: Record<ServiceKey, number> = { audit: state.audit.remaining, diagnostic: state.diagnostic.remaining, prescripteur: state.prescripteur.remaining };
   let remainingTotal = state.total.remaining;
   const mailFor = opts.mailFor ?? defaultMailFor;
 
@@ -263,7 +276,8 @@ export async function runCampaigns(opts: { campaignId?: string; budgetMs?: numbe
   // Plus rien ne peut partir : le total est atteint, ou chaque service qui a des mails à envoyer est à son plafond.
   if (remainingTotal <= 0 || (dueServices.length ? dueServices.every((s) => remaining[s] <= 0) : remaining.audit <= 0)) {
     const onlyAudit = dueServices.every((s) => s === "audit");
-    const caps = onlyAudit ? `${state.audit.limit} mails` : (["audit", "diagnostic"] as const).map((s) => `${SERVICE_LABEL[s]} ${state[s].sent}/${state[s].limit}`).join(", ");
+    // Les prescripteurs n'apparaissent que s'ils ont envoyé ou ont des mails dus : le message des deux autres services ne change pas.
+    const caps = onlyAudit ? `${state.audit.limit} mails` : SERVICE_KEYS.filter((s) => s !== "prescripteur" || dueServices.includes(s) || state[s].sent > 0).map((s) => `${SERVICE_LABEL[s]} ${state[s].sent}/${state[s].limit}`).join(", ");
     return { ok: true, sent: 0, stopped: 0, errors: 0, waiting: dueAll, message: `Plafond du jour atteint (${caps}). ${dueAll} mail(s) en attente : ils partiront demain${onlyAudit ? ", ou monte MAIL_DAILY_LIMIT" : ""}.${pausedNote ? ` ${pausedNote}.` : ""}` };
   }
 
@@ -306,11 +320,11 @@ export async function runCampaigns(opts: { campaignId?: string; budgetMs?: numbe
     const already = (await db.select({ id: schema.mailSends.id }).from(schema.mailSends).where(and(eq(schema.mailSends.companyId, c.id), eq(schema.mailSends.offer, offer), eq(schema.mailSends.step, step))).limit(1))[0];
     let hook = "";
     const finishStep = async (sentOn: string, subject: string, viaBrevo: boolean) => {
-      const nd = nextDueAfterSend(sentOn, step);
+      const nd = nextDueAfterSend(sentOn, step, sequenceDays(service));
       await db.transaction(async (tx) => {
         if (viaBrevo) {
           await tx.insert(schema.mailSends).values({ companyId: c.id, offer, step, subject, sentOn });
-          await logEvent(tx, c.id, "mail", `Mail ${STEP_LABELS[step]} envoyé par la campagne « ${campaign.name} » (${offerLabel(offer)}) : « ${subject} »`);
+          await logEvent(tx, c.id, "mail", `Mail ${stepLabel(service, step)} envoyé par la campagne « ${campaign.name} » (${offerLabel(offer)}) : « ${subject} »`);
           if (c.stage !== "perdu" && stageRank(c.stage) < stageRank("contacte")) await tx.update(schema.companies).set({ stage: "contacte" }).where(eq(schema.companies.id, c.id));
           await tx.update(schema.companies).set({ lastContact: sentOn }).where(eq(schema.companies.id, c.id));
           // Diagnostic : le mail J+3 est parti, le CRM prépare l'appel du lendemain (J+4) avec le constat et les phrases d'ouverture.
@@ -323,6 +337,21 @@ export async function runCampaigns(opts: { campaignId?: string; budgetMs?: numbe
               phone: ct?.phone ?? "",
               hook: h,
               domain: isHookVariant(h) && HOOK_TEXT[h].family === "B" ? target.webHost : target.mailDomain,
+              me: profile.me,
+              sentOn,
+            });
+            if (call && !(await tx.select({ id: schema.tasks.id }).from(schema.tasks).where(and(eq(schema.tasks.title, call.title), eq(schema.tasks.done, false))).limit(1))[0]) {
+              await tx.insert(schema.tasks).values({ title: call.title, companyId: c.id, dueDate: call.dueDate, priority: call.priority });
+              await logEvent(tx, c.id, "note", `Appel prévu le ${call.dueDate.split("-").reverse().join("/")} : phrases d'ouverture\n\n${call.opening}`);
+            }
+          }
+          // Prescripteurs : la relance (J+7) est partie, le CRM prépare l'appel du lendemain.
+          if (service === "prescripteur" && step === 1) {
+            const call = prescriberCallTask({
+              kind: prescriberKindOf(c.sector),
+              company: c.name,
+              contactName: /^standard$/i.test(ct?.firstName ?? "") ? "" : [ct?.firstName, ct?.lastName].filter(Boolean).join(" "),
+              phone: ct?.phone ?? "",
               me: profile.me,
               sentOn,
             });
@@ -352,6 +381,18 @@ export async function runCampaigns(opts: { campaignId?: string; budgetMs?: numbe
       }
       mail = prep.mail;
       hook = prep.hook;
+    } else if (service === "prescripteur") {
+      const kind = prescriberKindOf(c.sector);
+      if (!reservedSectors().includes(c.sector)) { await stop(item.id, kind === "partenaire" ? "Partenaires non activés (PRESCRIPTEUR_PARTENAIRES)" : "Secteur hors des prescripteurs"); continue; }
+      const first = (ct?.firstName ?? "").trim();
+      const firstName = !first || /^standard$/i.test(first) || greetsWithoutName(email, ct?.emailSource ?? "") ? "" : first;
+      const m = composePrescriberMail({ kind, step, firstName, company: c.name, signature: scripts(prospect, "audit", profile).x.sig });
+      if (!m.ok) {
+        await db.update(schema.mailCampaignItems).set({ lastError: m.error.slice(0, 300) }).where(eq(schema.mailCampaignItems.id, item.id));
+        errors++;
+        continue;
+      }
+      mail = { subject: m.subject, body: m.text };
     } else mail = mailFor(offer, prospect, profile, step);
     if (!mail) {
       await db.update(schema.mailCampaignItems).set({ lastError: `Aucun modèle de mail pour « ${offerLabel(offer)} » : rien n'a été envoyé.` }).where(eq(schema.mailCampaignItems.id, item.id));
@@ -363,7 +404,7 @@ export async function runCampaigns(opts: { campaignId?: string; budgetMs?: numbe
       to: { email, name: [ct?.firstName, ct?.lastName].filter(Boolean).join(" ") || undefined },
       subject: mail.subject,
       text: withUnsubscribeFooter(mail.body, link),
-      tags: ["crm", "campagne", offer, STEP_LABELS[step]],
+      tags: ["crm", "campagne", offer, stepLabel(service, step)],
       headers: { "List-Unsubscribe": `<${link}>`, "List-Unsubscribe-Post": "List-Unsubscribe=One-Click" },
     });
     if (!res.ok) {

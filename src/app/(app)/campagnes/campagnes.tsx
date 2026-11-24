@@ -7,11 +7,12 @@ import { Card } from "@/components/ui";
 import { Icon } from "@/components/icon";
 import { useToast } from "@/components/mod/toast";
 import { OFFER_KIT, type OfferKey } from "@/lib/prospection";
-import { REPLIED_REASON, SERVICE_KEYS, SERVICE_LABEL, STEP_LABELS, type ServiceKey } from "@/lib/campaign";
+import { REPLIED_REASON, SERVICE_KEYS, SERVICE_LABEL, stepLabel, type ServiceKey } from "@/lib/campaign";
 import { fd } from "@/lib/format";
 import { Diagnostics, type DiagCandidate, type DiagProspect, type DiagRow } from "./diagnostics";
 import { SEGMENT_LABEL, isSegment } from "@/lib/diagnostic-mails";
 import { Bilan, type BilanView } from "./bilan";
+import { Prescripteurs, type PrescData } from "./prescripteurs";
 
 type P = { id: string; name: string; sector: string; email: string; why: string | null };
 type Item = { id: string; company: string; step: number; due: string; status: string; reason: string; error: string };
@@ -23,7 +24,7 @@ type Diag = { limit: number; sent: number; stage: number; stages: number[]; targ
 
 const STATUS: Record<string, string> = { active: "En cours", pause: "En pause", terminee: "Terminée" };
 
-export function Campagnes({ prospects, offers, ready, urlOk, dailyLimit, sentToday, diagnostic, total, restDays, diag, bilan, status, pauseRule, fromEmail, health, campaigns: allCampaigns }: { prospects: P[]; offers: OfferKey[]; ready: boolean; urlOk: boolean; dailyLimit: number; sentToday: number; diagnostic: Diag; total: { limit: number; sent: number }; restDays: number; bilan: { views: BilanView[]; minSample: number }; diag: { prospects: DiagProspect[]; rows: DiagRow[]; pending: number; freshDays: number; candidates: DiagCandidate[] }; status: Record<ServiceKey, Status>; pauseRule: { windowDays: number; minSends: number; maxBounceRate: number }; fromEmail: string; health: Health; campaigns: C[] }) {
+export function Campagnes({ prospects, offers, ready, urlOk, dailyLimit, sentToday, diagnostic, total, restDays, diag, bilan, status, pauseRule, fromEmail, health, presc, campaigns: allCampaigns }: { presc: PrescData; prospects: P[]; offers: OfferKey[]; ready: boolean; urlOk: boolean; dailyLimit: number; sentToday: number; diagnostic: Diag; total: { limit: number; sent: number }; restDays: number; bilan: { views: BilanView[]; minSample: number }; diag: { prospects: DiagProspect[]; rows: DiagRow[]; pending: number; freshDays: number; candidates: DiagCandidate[] }; status: Record<ServiceKey, Status>; pauseRule: { windowDays: number; minSends: number; maxBounceRate: number }; fromEmail: string; health: Health; campaigns: C[] }) {
   const router = useRouter();
   const toast = useToast();
   const [pending, start] = useTransition();
@@ -83,8 +84,8 @@ export function Campagnes({ prospects, offers, ready, urlOk, dailyLimit, sentTod
 
       <div role="tablist" aria-label="Service" className="flex flex-wrap items-center gap-2">
         {SERVICE_KEYS.map((s) => {
-          const sent = s === "audit" ? sentToday : diagnostic.sent;
-          const limit = s === "audit" ? dailyLimit : diagnostic.limit;
+          const sent = s === "audit" ? sentToday : s === "diagnostic" ? diagnostic.sent : presc.sent;
+          const limit = s === "audit" ? dailyLimit : s === "diagnostic" ? diagnostic.limit : presc.limit;
           return (
             <button key={s} type="button" role="tab" aria-selected={tab === s} className={tab === s ? "btn btn-pri btn-sm" : "btn btn-sec btn-sm"} onClick={() => setTab(s)}>
               {SERVICE_LABEL[s]} · {sent}/{limit} aujourd&apos;hui
@@ -121,6 +122,8 @@ export function Campagnes({ prospects, offers, ready, urlOk, dailyLimit, sentTod
       )}
 
       {tab === "diagnostic" && <Diagnostics prospects={diag.prospects} rows={diag.rows} pending={diag.pending} freshDays={diag.freshDays} candidates={diag.candidates} canSend={ready && urlOk} left={Math.max(0, diagnostic.limit - diagnostic.sent)} limit={diagnostic.limit} />}
+
+      {tab === "prescripteur" && <Prescripteurs data={presc} canSend={ready && urlOk} />}
 
       {tab === "audit" && <Card title="Nouvelle campagne" actions={<span className="text-xs text-subtle-fg">Envoi depuis {fromEmail} · {sentToday}/{dailyLimit} mails aujourd&apos;hui</span>}>
         <div className="flex flex-col gap-4 p-5">
@@ -194,7 +197,7 @@ export function Campagnes({ prospects, offers, ready, urlOk, dailyLimit, sentTod
                 <details key={c.id} className="p-5">
                   <summary className="flex cursor-pointer flex-wrap items-center gap-3">
                     <strong>{c.name}</strong>
-                    <span className="text-xs text-muted-fg">{OFFER_KIT[c.offer as OfferKey]?.l ?? (c.offer === "diagnostic" ? "Diagnostic gratuit" : c.offer)}{isSegment(c.segment) ? ` · ${SEGMENT_LABEL[c.segment]}` : ""} · {STATUS[c.status] ?? c.status}</span>
+                    <span className="text-xs text-muted-fg">{OFFER_KIT[c.offer as OfferKey]?.l ?? (c.offer === "diagnostic" ? "Diagnostic gratuit" : c.offer === "prescripteur" ? "Prescripteurs (J0, J+7, appel)" : c.offer)}{isSegment(c.segment) ? ` · ${SEGMENT_LABEL[c.segment]}` : ""} · {STATUS[c.status] ?? c.status}</span>
                     <span className="text-xs text-muted-fg">{n("en_cours")} en cours · {n("termine")} terminée(s) · {n("arrete")} arrêtée(s){c.items.some((i) => i.error) ? ` · ${c.items.filter((i) => i.error).length} en erreur` : ""}</span>
                     <span className="text-xs text-muted-fg">{c.stats.contacted} contactée(s) · {c.stats.mails} mail(s) · {c.stats.replies} réponse(s) · {c.stats.bounces} rebond(s){c.stats.spam ? ` · ${c.stats.spam} plainte(s) spam` : ""}{c.stats.optouts ? ` · ${c.stats.optouts} désinscrit(s)` : ""}</span>
                   </summary>
@@ -211,7 +214,7 @@ export function Campagnes({ prospects, offers, ready, urlOk, dailyLimit, sentTod
                       {c.items.map((i) => (
                         <tr key={i.id} className="tr">
                           <td className="td">{i.company}</td>
-                          <td className="td num text-muted-fg">{i.status === "en_cours" ? `${STEP_LABELS[i.step]} · ${fd(i.due)}` : "—"}</td>
+                          <td className="td num text-muted-fg">{i.status === "en_cours" ? `${stepLabel(c.service, i.step)} · ${fd(i.due)}` : "—"}</td>
                           <td className="td text-muted-fg">{i.status === "en_cours" ? (i.error ? `Erreur : ${i.error}` : "En cours") : i.reason || (i.status === "termine" ? "Terminée" : "Arrêtée")}</td>
                           <td className="td text-right">
                             {i.status === "arrete" && i.reason === REPLIED_REASON && (

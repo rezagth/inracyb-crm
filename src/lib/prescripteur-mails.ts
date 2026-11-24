@@ -2,7 +2,7 @@
  * Mails aux prescripteurs : cabinets d'expertise comptable, d'avocats, notaires, courtiers, prestataires IT.
  * Règle de déontologie : un expert-comptable, un avocat ou un notaire ne peut ni toucher ni verser de commission pour une
  * simple recommandation (décret n° 2012-432, art. 162 ; RIN art. 11.3). Leurs textes ne parlent donc jamais de commission.
- * Textes rédigés le 18/11/2026, à relire par le propriétaire avant tout envoi.
+ * Textes rédigés le 18/11/2026, validés le 24/11/2026 pour l'envoi (lot P1).
  */
 import { PARTNER_COMMISSION_PCT, REFERRED_CLIENT_DISCOUNT_PCT } from "./pricing";
 
@@ -82,4 +82,44 @@ export function composePrescriberMail(i: PrescriberMailInput): { ok: true; subje
   const text = fill(tpl.body);
   if (/\{[a-z]+\}/.test(text)) return { ok: false, error: "Un champ du modèle n'a pas été rempli." };
   return { ok: true, subject: tpl.subject, text };
+}
+
+/** Secteurs « partenaires » (commission avec accord écrit) : activés seulement avec PRESCRIPTEUR_PARTENAIRES=1, après l'immatriculation. */
+const PARTNER_SECTORS = ["Courtage"];
+
+/**
+ * Secteurs visés par la campagne prescripteurs, et donc réservés : la prospection client (audit, diagnostic) ne les vise plus.
+ * Sans les partenaires, les courtiers restent des clients potentiels.
+ */
+export function prescriberSectors(partnersEnabled: boolean): string[] {
+  return [...REGULATED_SECTORS, ...(partnersEnabled ? PARTNER_SECTORS : [])];
+}
+
+/** Un numéro est utilisable s'il contient au moins 9 chiffres. */
+const usablePhone = (p: string): boolean => p.replace(/\D/g, "").length >= 9;
+const one = (s: string, max: number) => s.replace(/[\r\n\t]+/g, " ").replace(/\s+/g, " ").trim().slice(0, max);
+
+export type PrescriberCall = { title: string; dueDate: string; priority: "haute"; opening: string };
+
+/**
+ * Tâche d'appel après la relance (J+7) : le lendemain. Le canevas ne parle jamais de commission à une profession
+ * réglementée. null sans numéro utilisable.
+ */
+export function prescriberCallTask(i: { kind: PrescriberKind; company: string; contactName: string; phone: string; me: string; sentOn: string }): PrescriberCall | null {
+  if (!usablePhone(i.phone)) return null;
+  const company = one(i.company, 120);
+  const phone = one(i.phone, 30);
+  const who = one(i.contactName, 80);
+  const due = new Date(Date.parse(i.sentOn + "T12:00:00Z") + 86_400_000).toISOString().slice(0, 10);
+  const offer =
+    i.kind === "reglemente"
+      ? `Je propose aux cabinets un diagnostic gratuit de la messagerie de leurs clients, sans rien leur demander en retour ; un client recommandé a ${REFERRED_CLIENT_DISCOUNT_PCT} % de remise.`
+      : `Je propose un partenariat : diagnostic gratuit pour vos clients, et ${PARTNER_COMMISSION_PCT} % du HT encaissé sur la première facture, avec un accord écrit.`;
+  const opening = [
+    `Bonjour${who ? " " + who : ""}, ${one(i.me, 80) || "[mon prénom]"} d'InfraCyb.`,
+    `Je vous ai écrit à propos de la sécurité de la messagerie de vos clients. ${offer}`,
+    `Pour commencer, je peux vous envoyer cette semaine le diagnostic de ${company} : une page, sans engagement.`,
+    "Si la personne refuse : la remercier et noter « refus » sur la fiche. Si elle accepte : lancer le diagnostic de son domaine et le lui envoyer dans la journée.",
+  ].join("\n");
+  return { title: `Appeler ${company} au ${phone} : prescripteur, après la relance`, dueDate: due, priority: "haute", opening };
 }

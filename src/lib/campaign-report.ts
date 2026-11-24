@@ -3,7 +3,7 @@
  * L'unité est l'entreprise contactée, suivie de son premier mail jusqu'au devis accepté.
  * Aucune conclusion n'est tirée d'un échantillon trop petit.
  */
-import { addDaysIso, SERVICE_LABEL, type ServiceKey } from "./campaign";
+import { addDaysIso, SERVICE_KEYS, SERVICE_LABEL, type ServiceKey } from "./campaign";
 import { SEGMENT_LABEL, isSegment } from "./diagnostic-mails";
 
 /** Une entreprise dans une campagne, avec ce qui lui est arrivé depuis. */
@@ -90,7 +90,7 @@ export function buildReport(records: ProspectRecord[], today: string, horizon: H
     if (r.signed.some(within)) row.signed++;
     rows.set(key, row);
   }
-  const order = (r: ReportRow) => (r.service === "audit" ? 0 : 1) + "|" + (r.segment === "autres" ? "z" : r.segment);
+  const order = (r: ReportRow) => SERVICE_KEYS.indexOf(r.service) + "|" + (r.segment === "autres" ? "z" : r.segment);
   return [...rows.values()].sort((a, b) => (order(a) < order(b) ? -1 : 1));
 }
 

@@ -102,7 +102,10 @@ test("état du jour : plafond par service et total, sans aucune variable d'envir
   const s = dailyState({ today: "2026-11-18", sentByOffer: { audit: 5, ciso: 2, ia: 1, diagnostic: 3 }, firstDiagnosticSendOn: "2026-11-16", auditLimit: 10, diagnosticTarget: 10 });
   assert.deepEqual(s.audit, { limit: 10, sent: 8, remaining: 2 }); // audit + RSSI + IA : même périmètre qu'avant
   assert.deepEqual({ limit: s.diagnostic.limit, sent: s.diagnostic.sent, remaining: s.diagnostic.remaining }, { limit: 6, sent: 3, remaining: 3 });
-  assert.deepEqual(s.total, { limit: 20, sent: 11, remaining: 9 });
+  assert.deepEqual(s.prescripteur, { limit: 10, sent: 0, remaining: 10 }); // prescripteurs : 10 par défaut
+  assert.deepEqual(s.total, { limit: 30, sent: 11, remaining: 19 }); // somme des trois plafonds visés
+  const p = dailyState({ today: "2026-11-18", sentByOffer: { prescripteur: 4, audit: 1 }, firstDiagnosticSendOn: null, auditLimit: 10, diagnosticTarget: 10, prescriberLimit: 5 });
+  assert.deepEqual([p.prescripteur.sent, p.prescripteur.remaining, p.audit.sent, p.total.limit, p.total.sent], [4, 1, 1, 25, 5]);
   // Sans envoi diagnostic, le service audit se comporte exactement comme le plafond unique d'avant.
   const before = dailyState({ today: "2026-11-18", sentByOffer: { audit: 10 }, firstDiagnosticSendOn: null, auditLimit: 10, diagnosticTarget: 10 });
   assert.equal(before.audit.remaining, 0);
@@ -198,4 +201,47 @@ test("origine des adresses : inconnue jamais, historique pour l'audit seulement"
   assert.equal(entryExclusion({ ...c, emailSource: "historique" }, none, none, "diagnostic", undefined, "2026-11-16"), "origine");
   assert.equal(entryExclusion({ ...c, emailSource: "site" }, none, none, "diagnostic", undefined, "2026-11-16"), null);
   assert.equal(entryExclusion(c, none, none, "audit", undefined, "2026-11-16"), null);
+});
+
+test("prescripteurs : service à part, séquence J0 puis J+7, étiquette Brevo reconnue", async () => {
+  const c = await import("../src/lib/campaign");
+  assert.equal(c.serviceOf("prescripteur"), "prescripteur");
+  assert.equal(c.serviceOf("diagnostic"), "diagnostic");
+  assert.equal(c.serviceOf("ciso"), "audit");
+  assert.deepEqual([...c.sequenceDays("prescripteur")], [0, 7]);
+  assert.deepEqual([...c.sequenceDays("audit")], [0, 3, 7, 14]);
+  assert.deepEqual([c.stepLabel("prescripteur", 0), c.stepLabel("prescripteur", 1), c.stepLabel("prescripteur", 2), c.stepLabel("diagnostic", 1)], ["J0", "J+7", "—", "J+3"]);
+  assert.equal(c.nextDueAfterSend("2026-11-02", 0, c.sequenceDays("prescripteur")), "2026-11-09");
+  assert.equal(c.nextDueAfterSend("2026-11-09", 1, c.sequenceDays("prescripteur")), null);
+  assert.equal(c.nextDueAfterSend("2026-11-02", 0), "2026-11-05"); // sans séquence précisée : celle d'avant
+  assert.equal(c.serviceFromTags(["crm", "campagne", "prescripteur", "J0"]), "prescripteur");
+  assert.equal(c.originBlock("historique", "prescripteur") !== null, true); // adresse historique refusée, comme pour le diagnostic
+});
+
+test("prescripteurs : cabinets réservés, jamais de discours client après le discours prescripteur", async () => {
+  const c = await import("../src/lib/campaign");
+  const { prescriberSectors } = await import("../src/lib/prescripteur-mails");
+  const reserved = prescriberSectors(false);
+  assert.deepEqual(reserved, ["Expertise comptable", "Juridique", "Notariat"]);
+  assert.deepEqual(prescriberSectors(true), ["Expertise comptable", "Juridique", "Notariat", "Courtage"]);
+  const t = "2026-11-18";
+  const cand = (sector: string) => ({ id: "x", name: "X", stage: "qualif", email: "contact@x.fr", emailSource: "site", sector });
+  const none = new Set<string>();
+  // Un cabinet réglementé ne reçoit plus la prospection client ; il entre chez les prescripteurs.
+  assert.equal(c.entryExclusion(cand("Juridique"), none, none, "diagnostic", undefined, t, 30, reserved), "reserve-prescripteurs");
+  assert.equal(c.entryExclusion(cand("Notariat"), none, none, "audit", undefined, t, 30, reserved), "reserve-prescripteurs");
+  assert.equal(c.entryExclusion(cand("Juridique"), none, none, "prescripteur", undefined, t, 30, reserved), null);
+  // Un courtier reste un client tant que les partenaires ne sont pas activés.
+  assert.equal(c.entryExclusion(cand("Courtage"), none, none, "diagnostic", undefined, t, 30, reserved), null);
+  assert.equal(c.entryExclusion(cand("Courtage"), none, none, "prescripteur", undefined, t, 30, reserved), "hors-prescripteurs");
+  assert.equal(c.entryExclusion(cand("Numérique"), none, none, "prescripteur", undefined, t, 30, reserved), "hors-prescripteurs");
+  // Déjà contacté comme prescripteur : plus jamais de discours client, même après le délai de repos.
+  const h = c.crossHistory("audit", [{ offer: "prescripteur", sentOn: "2026-01-05" }], []);
+  assert.deepEqual(h.services, ["prescripteur"]);
+  assert.equal(c.entryExclusion(cand("Numérique"), none, none, "audit", h, t, 30, reserved), "role-prescripteur");
+  // L'inverse reste permis après le repos (un cabinet prospecté hier comme client peut devenir prescripteur).
+  const h2 = c.crossHistory("prescripteur", [{ offer: "diagnostic", sentOn: "2026-01-05" }], []);
+  assert.equal(c.entryExclusion(cand("Juridique"), none, none, "prescripteur", h2, t, 30, reserved), null);
+  // Sans secteur connu (appel d'avant), la règle des cabinets ne s'applique pas : comportement inchangé.
+  assert.equal(c.entryExclusion({ id: "x", name: "X", stage: "qualif", email: "contact@x.fr" }, none, none, "audit", undefined, t, 30, reserved), null);
 });

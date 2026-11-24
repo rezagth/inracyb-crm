@@ -8,7 +8,7 @@ import Module from "node:module";
 import { PGlite } from "@electric-sql/pglite";
 import { drizzle } from "drizzle-orm/pglite";
 import { migrate } from "drizzle-orm/pglite/migrator";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import * as schema from "../src/db/schema";
 import { addDaysIso } from "../src/lib/campaign";
 import { scripts } from "../src/lib/prospection";
@@ -47,7 +47,7 @@ globalThis.fetch = (async (_url: unknown, init?: { body?: string }) => {
 const T = new Intl.DateTimeFormat("fr-CA", { timeZone: "Europe/Paris", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
 
 async function company(name: string, source = "historique", email = name.toLowerCase().replace(/[^a-z0-9]/g, "") + "@exemple.fr") {
-  const id = (await db.insert(schema.companies).values({ name, sector: "Juridique" }).returning({ id: schema.companies.id }))[0].id;
+  const id = (await db.insert(schema.companies).values({ name, sector: "Courtage" }).returning({ id: schema.companies.id }))[0].id;
   await db.insert(schema.contacts).values({ companyId: id, firstName: "Anne", lastName: "Martin", email, emailSource: source, isPrimary: true });
   return id;
 }
@@ -76,7 +76,7 @@ test("audit, non-régression : 10 mails le premier jour, mêmes textes, en-tête
   assert.equal(outbox.length, 10);
   assert.equal(await sendsOf("audit"), 10);
 
-  const expected = scripts({ name: "Cabinet Audit 1", sector: "Juridique", contact: "Anne Martin", role: "", email: "cabinetaudit1@exemple.fr", phone: "" }, "audit", await getProfile()).mails[0];
+  const expected = scripts({ name: "Cabinet Audit 1", sector: "Courtage", contact: "Anne Martin", role: "", email: "cabinetaudit1@exemple.fr", phone: "" }, "audit", await getProfile()).mails[0];
   const m = outbox.find((o) => o.to[0].email === "cabinetaudit1@exemple.fr")!;
   assert.equal(m.subject, expected.subject);
   const link = m.headers?.["List-Unsubscribe"]?.slice(1, -1) ?? "";
@@ -159,7 +159,7 @@ test("diagnostic : segment obligatoire, secteur hors segment et HSTS seul exclus
   assert.match(((await createCampaignAction("Diag", "diagnostic", diagIds, "cabinets")) as { error: string }).error, /Aucune des entreprises choisies n'est éligible/);
   assert.equal(await queueDiagnostics(diagIds), 6);
   assert.equal((await runDiagnostics({ budgetMs: 40_000 })).done, 6);
-  // Un cabinet (secteur Juridique) n'entre pas dans le segment des éditeurs.
+  // Un cabinet (secteur Courtage) n'entre pas dans le segment des éditeurs.
   assert.match(((await createCampaignAction("Diag", "diagnostic", diagIds, "editeurs")) as { error: string }).error, /Aucune des entreprises choisies n'est éligible/);
 
   const before = outbox.length;
@@ -194,7 +194,7 @@ test("diagnostic : segment obligatoire, secteur hors segment et HSTS seul exclus
   assert.deepEqual([(await itemOf(diagIds[0])).hook, (await itemOf(diagIds[1])).hook, (await itemOf(diagIds[3])).hook], ["spf-absent", "dmarc-none", "tls-expire"]);
 
   const s = await getDailyState();
-  assert.deepEqual([s.audit.sent, s.audit.limit, s.diagnostic.sent, s.diagnostic.limit, s.total.sent, s.total.limit], [10, 10, 4, 4, 14, 20]);
+  assert.deepEqual([s.audit.sent, s.audit.limit, s.diagnostic.sent, s.diagnostic.limit, s.prescripteur.sent, s.prescripteur.limit, s.total.sent, s.total.limit], [10, 10, 4, 4, 0, 10, 14, 30]); // total = somme des trois plafonds visés
   assert.equal(s.diagnostic.firstSendOn, T);
   const full = await runCampaigns();
   assert.deepEqual([full.sent, full.waiting], [0, 3]);
@@ -488,9 +488,73 @@ test("bilan : les entreprises des campagnes sont classées par service et segmen
   assert.equal(diag.label, "Diagnostic · Cabinets comptables, juridiques, courtiers");
   assert.deepEqual([diag.delivered, diag.meetings, diag.signed], [1, 1, 1]);
   assert.ok(diag.contacted >= 4 && diag.mails >= diag.contacted);
-  const audit = rows.find((r) => r.service === "audit" && r.segment === "cabinets")!; // secteur Juridique
+  const audit = rows.find((r) => r.service === "audit" && r.segment === "cabinets")!; // secteur Courtage (les cabinets réglementés sont réservés aux prescripteurs)
   assert.ok(audit.contacted >= 10);
   assert.ok(audit.replied >= 2 && audit.optedOut >= 1);
   assert.equal(audit.delivered, 0); // des accusés existent désormais, aucun pour l'audit
   assert.equal(rows.reduce((a, r) => a + r.contacted, 0), records.filter((r) => r.firstSend).length);
+});
+
+test("prescripteurs : séquence J0 puis J+7, texte sans commission pour les cabinets réglementés, appel le lendemain de la relance", async () => {
+  const { createCampaignAction } = await import("../src/server/actions/campaigns");
+  const { runCampaigns } = await import("../src/server/campaigns");
+  const mk = async (name: string, sector: string, email: string, firstName: string, phone = "") => {
+    const id = (await db.insert(schema.companies).values({ name, sector }).returning({ id: schema.companies.id }))[0].id;
+    await db.insert(schema.contacts).values({ companyId: id, firstName, lastName: firstName === "Standard" ? "" : "Martin", email, emailSource: "site", phone, isPrimary: true });
+    return id;
+  };
+  const avocat = await mk("Cabinet Lex", "Juridique", "anne.martin@lex.fr", "Anne", "04 72 00 00 00");
+  const compta = await mk("Compta Plus", "Expertise comptable", "contact@comptaplus.fr", "Standard");
+  const courtier = await mk("Courtage Sûr", "Courtage", "contact@courtage-sur.fr", "Standard");
+
+  // Sans PRESCRIPTEUR_PARTENAIRES, un courtier n'est pas visé (pas de commission avant l'immatriculation).
+  delete process.env.PRESCRIPTEUR_PARTENAIRES;
+  const before = outbox.length;
+  const r = await createCampaignAction("Prescripteurs Lyon", "prescripteur", [avocat, compta, courtier]);
+  assert.ok(r.ok, JSON.stringify(r));
+  assert.match((r as { message: string }).message, /^Campagne créée \(2 entreprise\(s\), 1 secteur hors des prescripteurs visés exclue\(s\)\)\. 2 mail\(s\) envoyé\(s\)/);
+  const j0 = outbox.slice(before);
+  assert.equal(j0.length, 2);
+  for (const o of j0) {
+    assert.deepEqual(o.tags, ["crm", "campagne", "prescripteur", "J0"]);
+    assert.equal(o.subject, "Un diagnostic gratuit de la messagerie de vos clients");
+    assert.doesNotMatch(o.subject + o.textContent, /commission|rétrocession|rétribu|rémunér|apporteur/i);
+    assert.match(o.textContent, /\n\nSe désinscrire en un clic : https:\/\/crm\.test\//);
+  }
+  assert.ok(mailTo("anne.martin@lex.fr")[0].textContent.startsWith("Bonjour Anne,\n\nJe suis RSSI externalisé (InfraCyb)."));
+  assert.ok(mailTo("contact@comptaplus.fr")[0].textContent.startsWith("Bonjour,\n\n")); // adresse générique : pas de prénom
+  assert.match(mailTo("contact@comptaplus.fr")[0].textContent, /commence par le domaine de Compta Plus/);
+  assert.deepEqual([(await itemOf(avocat)).nextStep, (await itemOf(avocat)).nextDue], [1, addDaysIso(T, 7)]);
+  assert.equal(await itemOf(courtier), undefined);
+
+  // Un cabinet contacté comme prescripteur n'est plus prospecté comme client, même après la séquence.
+  const audit = await createCampaignAction("Audit cabinets", "audit", [avocat]);
+  assert.ok(!audit.ok);
+
+  // J+7 : la relance part, la séquence se termine, l'appel est prévu le lendemain (seulement avec un téléphone).
+  await db.update(schema.mailSends).set({ sentOn: "2026-01-05" }).where(eq(schema.mailSends.offer, "prescripteur"));
+  await db.update(schema.mailCampaignItems).set({ nextDue: T }).where(inArray(schema.mailCampaignItems.companyId, [avocat, compta]));
+  const run = await runCampaigns();
+  assert.equal(run.sent, 2, run.message);
+  const relance = mailTo("anne.martin@lex.fr")[1];
+  assert.equal(relance.subject, "Re : Un diagnostic gratuit de la messagerie de vos clients");
+  assert.deepEqual(relance.tags, ["crm", "campagne", "prescripteur", "J+7"]);
+  assert.deepEqual([(await itemOf(avocat)).status, (await itemOf(avocat)).stopReason], ["termine", "Séquence terminée"]);
+  const calls = await db.select().from(schema.tasks).where(eq(schema.tasks.companyId, avocat));
+  assert.equal(calls.length, 1);
+  assert.deepEqual([calls[0].title, calls[0].dueDate, calls[0].priority], ["Appeler Cabinet Lex au 04 72 00 00 00 : prescripteur, après la relance", addDaysIso(T, 1), "haute"]);
+  assert.equal((await db.select().from(schema.tasks).where(eq(schema.tasks.companyId, compta))).length, 0);
+
+  // Avec les partenaires activés, le courtier reçoit le texte partenaire (15 %, accord écrit).
+  process.env.PRESCRIPTEUR_PARTENAIRES = "1";
+  try {
+    const p = await createCampaignAction("Courtiers", "prescripteur", [courtier]);
+    assert.ok(p.ok, JSON.stringify(p));
+    const m = mailTo("contact@courtage-sur.fr")[0];
+    assert.equal(m.subject, "Partenariat : sécurité de la messagerie de vos clients");
+    assert.match(m.textContent, /15 % du montant HT encaissé/);
+    assert.match(m.textContent, /accord écrit/);
+  } finally {
+    delete process.env.PRESCRIPTEUR_PARTENAIRES;
+  }
 });

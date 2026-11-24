@@ -12,7 +12,7 @@ import { today } from "@/lib/format";
 import { prospectList } from "../queries";
 import { logEvent } from "../core";
 import { latestDiagnostics, queueDiagnostics, runDiagnostics } from "../diagnostic";
-import { crossHistories, optoutSet, recordOptout, recordRun, restDays, resumeService, runCampaigns } from "../campaigns";
+import { crossHistories, optoutSet, recordOptout, recordRun, reservedSectors, restDays, resumeService, runCampaigns } from "../campaigns";
 import { registerReply, undoReply } from "../replies";
 
 type R = { ok: true; message: string } | { ok: false; error: string };
@@ -43,16 +43,20 @@ export async function createCampaignAction(name: string, offer: string, companyI
   const history = await crossHistories(target);
   const t = today();
   const rest = restDays();
+  const reserved = reservedSectors();
   const diagnostics = target === "diagnostic" ? await latestDiagnostics() : new Map();
   const eligible: string[] = [];
   const excluded: Partial<Record<EntryExclusion, number>> = {};
   for (const p of (await prospectList()).filter((p) => wanted.has(p.id))) {
     // Diagnostic : le secteur doit correspondre au segment (le texte en dépend), et il faut un constat d'accroche mesuré récemment.
-    const ex = entryExclusion({ id: p.id, name: p.name, stage: p.stage, email: p.email, emailSource: p.emailSource }, optouts, inCampaign, target, history.get(p.id), t, rest) ?? (target !== "diagnostic" ? null : segmentOfSector(p.sector) !== segment ? "hors-segment" : !usableDiagnostic(diagnostics.get(p.id), t) ? "sans-constat" : null);
+    const ex = entryExclusion({ id: p.id, name: p.name, stage: p.stage, email: p.email, emailSource: p.emailSource, sector: p.sector }, optouts, inCampaign, target, history.get(p.id), t, rest, reserved) ?? (target !== "diagnostic" ? null : segmentOfSector(p.sector) !== segment ? "hors-segment" : !usableDiagnostic(diagnostics.get(p.id), t) ? "sans-constat" : null);
     if (ex) excluded[ex] = (excluded[ex] ?? 0) + 1;
     else eligible.push(p.id);
   }
-  if (!eligible.length) return { ok: false, error: "Aucune des entreprises choisies n'est éligible (e-mail manquant, perdue, désinscrite, déjà en campagne, en délai de repos ou adresse d'origine inconnue)." };
+  if (!eligible.length) {
+    const why = Object.entries(excluded).map(([k, v]) => `${v} ${ENTRY_EXCLUSION_LABEL[k as EntryExclusion]}`).join(", ");
+    return { ok: false, error: `Aucune des entreprises choisies n'est éligible${why ? ` (${why})` : ""}.` };
+  }
 
   // Campagne et entrées dans la même transaction : si une entreprise vient d'entrer dans une autre séquence (index unique), rien n'est créé.
   let camp: { id: string };
@@ -141,7 +145,7 @@ export async function replyReceivedAction(companyId: string): Promise<R> {
 /** Reprend un service mis en pause automatiquement (rebonds, plainte). À faire après avoir corrigé la cause. */
 export async function resumeServiceAction(service: string): Promise<R> {
   await requireUser();
-  const s = z.enum(["audit", "diagnostic"]).safeParse(service);
+  const s = z.enum(["audit", "diagnostic", "prescripteur"]).safeParse(service);
   if (!s.success) return { ok: false, error: "Service invalide." };
   await resumeService(s.data);
   revalidatePath("/campagnes");

@@ -42,3 +42,17 @@ test("prix : le prix pilote est une remise d'environ 25 % et les places se déco
   assert.equal(pilotSlotsLeft(2), 1);
   assert.equal(pilotSlotsLeft(9), 0);
 });
+
+test("appel après la relance : le lendemain, jamais de commission pour un cabinet réglementé, rien sans téléphone", async () => {
+  const { prescriberCallTask } = await import("../src/lib/prescripteur-mails");
+  const base = { company: "Cabinet Lex", contactName: "Anne Martin", phone: "04 72 00 00 00", me: "Reza", sentOn: "2026-11-30" };
+  const r = prescriberCallTask({ ...base, kind: "reglemente" });
+  assert.ok(r);
+  assert.deepEqual([r!.title, r!.dueDate, r!.priority], ["Appeler Cabinet Lex au 04 72 00 00 00 : prescripteur, après la relance", "2026-12-01", "haute"]);
+  assert.ok(r!.opening.startsWith("Bonjour Anne Martin, Reza d'InfraCyb."));
+  assert.doesNotMatch(r!.opening, FORBIDDEN_FOR_REGULATED);
+  const p = prescriberCallTask({ ...base, kind: "partenaire" });
+  assert.match(p!.opening, new RegExp(`${PARTNER_COMMISSION_PCT} % du HT encaissé`));
+  assert.equal(prescriberCallTask({ ...base, kind: "reglemente", phone: "01 23" }), null);
+  assert.doesNotMatch(prescriberCallTask({ ...base, kind: "reglemente", company: "A\nB" })!.title, /\n/);
+});

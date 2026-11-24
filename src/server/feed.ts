@@ -1,7 +1,7 @@
 import "server-only";
 import { and, asc, desc, eq, inArray, ne, sql } from "drizzle-orm";
 import { db, schema } from "@/db";
-import { entryExclusion, ENTRY_EXCLUSION_LABEL, SERVICE_LABEL, serviceOf, type ServiceKey } from "@/lib/campaign";
+import { entryExclusion, ENTRY_EXCLUSION_LABEL, SERVICE_LABEL, serviceOf, type CrossHistory, type ServiceKey } from "@/lib/campaign";
 import { greetsWithoutName, hostOf, pickPublishedEmail, siteFromNotes } from "@/lib/contact-extract";
 import { DIAGNOSTIC_FRESH_DAYS, RULES_VERSION, usableDiagnostic, type Probe } from "@/lib/diagnostic";
 import { SEGMENTS, isSegment, segmentOfSector, type Segment } from "@/lib/diagnostic-mails";
@@ -9,7 +9,7 @@ import { siteCandidates } from "@/lib/site-guess";
 import { enrolSlots, FEED_DEFAULTS, isPhone, MAILS_PER_PROSPECT, missingCoordinates, nextCursor, parseDepartements, permanentName, readCursors, REJECT, searchPlan, type Cursor } from "@/lib/feed";
 import { addDays, today } from "@/lib/format";
 import { EFFECTIF_CODES, type SearchInput } from "@/lib/prospect-search";
-import { checkServicePauses, crossHistories, getDailyState, optoutSet, restDays } from "./campaigns";
+import { checkServicePauses, crossHistories, getDailyState, optoutSet, reservedSectors, restDays } from "./campaigns";
 import { logEvent } from "./core";
 import { queueDiagnostics, runDiagnostics } from "./diagnostic";
 import { crawlSite, type Crawl } from "./enrich";
@@ -354,7 +354,8 @@ export async function runFeed(opts: { source?: "cron" | "manuel"; budgetMs?: num
     }
     const optouts = await optoutSet();
     const rest = restDays();
-    const history = { audit: await crossHistories("audit"), diagnostic: await crossHistories("diagnostic") };
+    const history: Partial<Record<ServiceKey, Map<string, CrossHistory>>> = { audit: await crossHistories("audit"), diagnostic: await crossHistories("diagnostic") };
+    const reserved = reservedSectors();
     const diagRows = await db.select().from(schema.companyDiagnostics).where(inArray(schema.companyDiagnostics.companyId, ready.map((r) => r.companyId))).orderBy(desc(schema.companyDiagnostics.createdAt));
     const campaigns = new Map<string, { id: string; status: string }>();
 
@@ -365,10 +366,10 @@ export async function runFeed(opts: { source?: "cron" | "manuel"; budgetMs?: num
       const c = (await db.select().from(schema.companies).where(eq(schema.companies.id, it.companyId)).limit(1))[0];
       if (!c) { await reject(it.id, REJECT.gone); continue; }
       const ct = (await db.select().from(schema.contacts).where(eq(schema.contacts.companyId, c.id)).orderBy(desc(schema.contacts.isPrimary)).limit(1))[0];
-      const cand = { id: c.id, name: c.name, stage: c.stage, email: ct?.email ?? "", emailSource: ct?.emailSource ?? "" };
+      const cand = { id: c.id, name: c.name, stage: c.stage, email: ct?.email ?? "", emailSource: ct?.emailSource ?? "", sector: c.sector };
 
       const judge = (service: ServiceKey): Verdict => {
-        const ex = entryExclusion(cand, optouts, inCampaign, service, history[service].get(c.id), t, rest);
+        const ex = entryExclusion(cand, optouts, inCampaign, service, history[service]?.get(c.id), t, rest, reserved);
         if (ex === "deja-en-campagne" || ex === "repos") return { kind: "wait", reason: `En attente : ${ENTRY_EXCLUSION_LABEL[ex]}` };
         if (ex) return { kind: "reject", reason: `Non inscrite : ${ENTRY_EXCLUSION_LABEL[ex]}` };
         if (service === "diagnostic") {

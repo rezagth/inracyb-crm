@@ -3,8 +3,9 @@ import { db, schema } from "@/db";
 import { prospectList } from "@/server/queries";
 import { getSettings } from "@/server/core";
 import { brevoConfig, brevoReady } from "@/server/brevo";
-import { appUrl, checkServicePauses, crossHistories, getDailyState, optoutSet, restDays } from "@/server/campaigns";
-import { PAUSE_RULE, entryExclusion, ENTRY_EXCLUSION_LABEL, RAMP_EVERY, serviceOf } from "@/lib/campaign";
+import { appUrl, checkServicePauses, crossHistories, getDailyState, optoutSet, prescriberPartnersEnabled, reservedSectors, restDays } from "@/server/campaigns";
+import { prescriberKindOf } from "@/lib/prescripteur-mails";
+import { PAUSE_RULE, entryExclusion, ENTRY_EXCLUSION_LABEL, RAMP_EVERY, serviceOf, type ServiceKey } from "@/lib/campaign";
 import { BILLING_SERVICE, BOUNCE_REASONS, REASON } from "@/lib/brevo-events";
 import { today } from "@/lib/format";
 import { siteFromNotes } from "@/lib/contact-extract";
@@ -32,8 +33,9 @@ export default async function CampagnesPage() {
   // Éligibilité vue depuis le service Audit (seul service ouvert à la création pour l'instant).
   const history = await crossHistories("audit");
   const rest = restDays();
+  const reserved = reservedSectors();
   const prospects = (await prospectList()).map((p) => {
-    const ex = entryExclusion({ id: p.id, name: p.name, stage: p.stage, email: p.email, emailSource: p.emailSource }, optouts, inCampaign, "audit", history.get(p.id), t, rest);
+    const ex = entryExclusion({ id: p.id, name: p.name, stage: p.stage, email: p.email, emailSource: p.emailSource, sector: p.sector }, optouts, inCampaign, "audit", history.get(p.id), t, rest, reserved);
     return { id: p.id, name: p.name, sector: p.sector, email: p.email, why: ex ? ENTRY_EXCLUSION_LABEL[ex] : null };
   });
   const state = await getDailyState(t);
@@ -55,7 +57,7 @@ export default async function CampagnesPage() {
     const segment = segmentOfSector(p.sector);
     if (!d || !segment || !usableDiagnostic(d, t)) return [];
     const variant = hookOf(parseChecks(d.findings))?.variant ?? "";
-    const ex = entryExclusion({ id: p.id, name: p.name, stage: p.stage, email: p.email, emailSource: p.emailSource }, optouts, inCampaign, "diagnostic", diagHistory.get(p.id), t, rest);
+    const ex = entryExclusion({ id: p.id, name: p.name, stage: p.stage, email: p.email, emailSource: p.emailSource, sector: p.sector }, optouts, inCampaign, "diagnostic", diagHistory.get(p.id), t, rest, reserved);
     return [{ id: p.id, name: p.name, sector: p.sector, segment, email: p.email, hook: isHookVariant(variant) ? HOOK_LABEL[variant] : "", contact: p.contact, why: ex ? ENTRY_EXCLUSION_LABEL[ex] : null }];
   });
   const diagRows = [...latest.values()].map((d) => {
@@ -63,8 +65,16 @@ export default async function CampagnesPage() {
     return { id: d.id, company: names.get(d.companyId) ?? "", target: [...new Set([d.mailDomain, d.webHost].filter(Boolean))].join(" · "), checkedOn: d.checkedOn, main: main?.label ?? "", mainWording: main?.wording ?? "", certainCount: d.certainCount, usable: usableDiagnostic(d, t) };
   });
   const diagPending = (await db.select({ id: schema.companyDiagnostics.id }).from(schema.companyDiagnostics).where(eq(schema.companyDiagnostics.status, "a_faire"))).length;
+  // Onglet Prescripteurs : cabinets des secteurs visés (réglementés, plus les courtiers si les partenaires sont activés).
+  const prescHistory = await crossHistories("prescripteur");
+  const partnersOn = prescriberPartnersEnabled();
+  const prescCandidates = all.flatMap((p) => {
+    if (!reserved.includes(p.sector)) return [];
+    const ex = entryExclusion({ id: p.id, name: p.name, stage: p.stage, email: p.email, emailSource: p.emailSource, sector: p.sector }, optouts, inCampaign, "prescripteur", prescHistory.get(p.id), t, rest, reserved);
+    return [{ id: p.id, name: p.name, sector: p.sector, email: p.email, kind: prescriberKindOf(p.sector), why: ex ? ENTRY_EXCLUSION_LABEL[ex] : null }];
+  });
   const status = await checkServicePauses();
-  const statusOf = (k: "audit" | "diagnostic") => ({ paused: status[k].paused, reason: status[k].reason, ...status[k].health });
+  const statusOf = (k: ServiceKey) => ({ paused: status[k].paused, reason: status[k].reason, ...status[k].health });
   const sends = await db.select({ companyId: schema.mailSends.companyId, offer: schema.mailSends.offer }).from(schema.mailSends);
   const statsOf = (campaignId: string, offer: string) => {
     const its = items.filter((i) => i.item.campaignId === campaignId);
@@ -98,7 +108,7 @@ export default async function CampagnesPage() {
   const offers = s.offers.split(",").filter((x): x is "audit" | "ciso" | "ia" => ["audit", "ciso", "ia"].includes(x));
   return (
     <>
-      <PageHeader title="Campagnes" subtitle="Envoie une séquence de mails (J0, J+3, J+7, J+14) à plusieurs entreprises d'un coup : le CRM étale les envois et s'arrête tout seul si l'entreprise avance, est perdue ou se désinscrit." />
+      <PageHeader title="Campagnes" subtitle="Envoie une séquence de mails (J0, J+3, J+7, J+14 ; J0 et J+7 pour les prescripteurs) à plusieurs entreprises d'un coup : le CRM étale les envois et s'arrête tout seul si l'entreprise avance, est perdue ou se désinscrit." />
       <Campagnes
         prospects={prospects}
         offers={offers.length ? offers : ["audit"]}
@@ -111,7 +121,8 @@ export default async function CampagnesPage() {
         restDays={rest}
         bilan={{ views: bilan, minSample: MIN_SAMPLE }}
         diag={{ prospects: diagProspects, rows: diagRows, pending: diagPending, freshDays: DIAGNOSTIC_FRESH_DAYS, candidates: diagCandidates }}
-        status={{ audit: statusOf("audit"), diagnostic: statusOf("diagnostic") }}
+        status={{ audit: statusOf("audit"), diagnostic: statusOf("diagnostic"), prescripteur: statusOf("prescripteur") }}
+        presc={{ limit: state.prescripteur.limit, sent: state.prescripteur.sent, partnersOn, candidates: prescCandidates }}
         pauseRule={{ windowDays: PAUSE_RULE.windowDays, minSends: PAUSE_RULE.minSends, maxBounceRate: PAUSE_RULE.maxBounceRate }}
         fromEmail={brevoConfig().fromEmail}
         health={health}

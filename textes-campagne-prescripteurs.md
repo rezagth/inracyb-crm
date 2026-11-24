@@ -1,4 +1,4 @@
-# Textes de la campagne prescripteurs — à valider avant tout envoi
+# Textes de la campagne prescripteurs — validés le 24/11/2026
 
 Rédigés le 18/11/2026. Champs remplis par le CRM : {prenom}, {cabinet}, {signature}. Le texte des professions réglementées ne contient jamais le mot commission (test automatique).
 

@@ -187,7 +187,7 @@ test("un passage : seules les entreprises avec adresse publiée ET téléphone e
     found("Gamma Apps", "Numérique"), // complète, mais tout est en ordre côté courrier : aucun constat
     found("Hors Segment SARL", "Immobilier"), // secteur qui n'appartient pas au segment
   ];
-  world.pages["Expertise comptable||1"] = [found("Iota Compta", "Expertise comptable", { director: null }), found("Omicron Compta", "Expertise comptable", { director: null })];
+  world.pages["Courtage||1"] = [found("Iota Compta", "Courtage", { director: null }), found("Omicron Compta", "Courtage", { director: null })]; // courtiers : cabinets encore prospectés comme clients (les réglementés sont réservés aux prescripteurs)
   site("Alpha Logiciels", "www.alpha.fr", ["claire.durand@alpha.fr", "contact@alpha.fr"], ["01 40 00 00 01"]);
   world.places["Delta ESN"] = { website: "", phone: "01 40 00 00 05" };
   site("Epsilon Soft", "epsilon.fr", [], ["01 40 00 00 02"]);

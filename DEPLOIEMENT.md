@@ -153,9 +153,15 @@ Quand le mail **J+3** d'une campagne Diagnostic part, le CRM crée la tâche « 
 
 Chaque lundi à 7h15 UTC, `/api/cron/rapport` envoie par Brevo le bilan de la semaine (nouvelles entreprises, bilan par service et segment, alertes, actions). Destinataire : `REPORT_TO_EMAIL`, sinon l'e-mail du profil du CRM. Pour le tester : dans Vercel, Settings, Cron Jobs, bouton Run sur `/api/cron/rapport`.
 
-## Campagne prescripteurs (textes prêts, envoi pas encore branché)
+## Campagne prescripteurs (lot P1 : envoi branché)
 
-Textes dans `textes-campagne-prescripteurs.md`, code dans `src/lib/prescripteur-mails.ts`. Experts-comptables, avocats et notaires : jamais de commission (décret n° 2012-432, art. 162). Courtiers et prestataires IT : 15 % du HT encaissé, accord écrit. Le moteur de campagnes n'envoie pas encore cette séquence : à brancher après validation des textes. Aucun accord de commission avant l'immatriculation.
+Textes dans `textes-campagne-prescripteurs.md`, code dans `src/lib/prescripteur-mails.ts` (validés le 24/11/2026). Experts-comptables, avocats et notaires : jamais de commission (décret n° 2012-432, art. 162). Courtiers : 15 % du HT encaissé, accord écrit.
+
+- **Troisième service du moteur de campagnes**, onglet « Prescripteurs » de la page Campagnes : son propre plafond (`MAIL_DAILY_LIMIT_PRESCRIPTEUR`, 10 par jour par défaut), sa pause automatique (rebonds, plainte), son étiquette Brevo `prescripteur`, sa ligne dans le bilan et le rapport hebdomadaire. Le total du jour devient la somme des trois plafonds.
+- **Séquence** : premier message (J0), relance à J+7, puis une tâche « Appeler … » le lendemain de la relance (si la fiche a un téléphone), avec les phrases d'ouverture dans le journal.
+- **Cabinets réservés** : Expertise comptable, Juridique et Notariat ne reçoivent plus la prospection client (audit, diagnostic) ; les séquences déjà en cours se terminent normalement. Un cabinet contacté comme prescripteur n'est plus jamais prospecté comme client. L'alimentation automatique continue d'importer ces cabinets : ils sont notés « réservé à la campagne prescripteurs » et apparaissent dans l'onglet Prescripteurs, à lancer à la main.
+- **Courtiers** : visés seulement avec `PRESCRIPTEUR_PARTENAIRES=1` (après l'immatriculation et la relecture de l'accord écrit). Sans elle, ils restent des clients potentiels du diagnostic.
+- Aucune migration de base.
 
 ## Envoi des devis et factures depuis le CRM (étape 2, lots A et B)
 
