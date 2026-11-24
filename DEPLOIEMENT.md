@@ -156,3 +156,12 @@ Chaque lundi à 7h15 UTC, `/api/cron/rapport` envoie par Brevo le bilan de la se
 ## Campagne prescripteurs (textes prêts, envoi pas encore branché)
 
 Textes dans `textes-campagne-prescripteurs.md`, code dans `src/lib/prescripteur-mails.ts`. Experts-comptables, avocats et notaires : jamais de commission (décret n° 2012-432, art. 162). Courtiers et prestataires IT : 15 % du HT encaissé, accord écrit. Le moteur de campagnes n'envoie pas encore cette séquence : à brancher après validation des textes. Aucun accord de commission avant l'immatriculation.
+
+## Envoi des devis et factures depuis le CRM (étape 2, lots A et B)
+
+- **PDF** : le CRM produit lui-même le PDF des devis, factures et avoirs émis (bouton « Télécharger le PDF »). Un brouillon n'en a pas.
+- **Envoi** : bouton « Envoyer au client » sur un devis ou une facture émis, et « Envoyer » pour le rappel courtois et la relance ferme. Une fenêtre montre le destinataire, l'objet et le texte (modifiables) ; le PDF est joint. La mise en demeure reste à envoyer soi-même, de préférence en recommandé.
+- **Avant la mise en ligne** : ajouter et valider l'adresse d'expédition (ex. `facturation@`) dans Brevo > Expéditeurs, puis renseigner `MAIL_BILLING_FROM_EMAIL` (et facultativement `MAIL_BILLING_FROM_NAME`) dans Vercel. Sans elle, l'expéditeur habituel est utilisé. Les réponses du client vont vers l'e-mail de Paramètres > Identité.
+- **Séparé de la prospection** : ces mails ne comptent pas dans le plafond quotidien, partent même si une campagne est en pause, et ne consultent pas la liste des désinscrits. Ils portent l'étiquette Brevo `facturation` : un rebond, une plainte ou un clic « se désinscrire » sur un de ces mails crée une tâche prioritaire et n'est jamais compté dans les pauses ni le bilan des campagnes.
+- Sans Brevo configuré, les anciens liens « Préparer l'e-mail » restent affichés.
+- Aucune migration de base.

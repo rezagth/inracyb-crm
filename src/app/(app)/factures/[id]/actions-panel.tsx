@@ -6,6 +6,10 @@ import { useState, useTransition } from "react";
 import { addPaymentAction, createCreditNoteAction, deleteDraftAction, emitInvoiceAction, logReminderAction } from "@/server/actions/documents";
 import { PAY_METHODS } from "@/lib/constants";
 import { Icon } from "@/components/icon";
+import { SendDocButton, type Recipient } from "@/components/documents/send-doc-button";
+
+type Mail = { subject: string; text: string };
+export type InvoiceSend = { recipients: Recipient[]; attachment: string; mail: Mail; reminders: [Mail, Mail]; alreadySent: string | null };
 
 type R = { ok: true; id: string; message?: string } | { ok: false; error: string };
 
@@ -20,6 +24,7 @@ export function InvoiceActions({
   reminders,
   mailtoSend,
   mailtoReminders,
+  send,
 }: {
   id: string;
   status: string;
@@ -31,6 +36,8 @@ export function InvoiceActions({
   reminders: number[];
   mailtoSend: string | null;
   mailtoReminders: (string | null)[];
+  /** Envoi par Brevo (PDF joint) ; null si Brevo n'est pas configuré : on garde alors les liens mailto. */
+  send: InvoiceSend | null;
 }) {
   const router = useRouter();
   const [pending, start] = useTransition();
@@ -80,9 +87,22 @@ export function InvoiceActions({
           </button>
         </>
       )}
+      {send && status !== "brouillon" && status !== "annulee" && (
+        <SendDocButton
+          kind="facture"
+          id={id}
+          label={kind === "avoir" ? "Envoyer l'avoir au client" : "Envoyer au client"}
+          primary={status === "envoyee"}
+          recipients={send.recipients}
+          subject={send.mail.subject}
+          text={send.mail.text}
+          attachment={send.attachment}
+          alreadySent={send.alreadySent}
+        />
+      )}
       {kind === "facture" && status === "envoyee" && (
         <>
-          {mailtoSend && (
+          {!send && mailtoSend && (
             <a className="btn btn-sec" href={mailtoSend}>
               <Icon name="mail" />
               Préparer l&apos;e-mail d&apos;envoi
@@ -131,6 +151,21 @@ export function InvoiceActions({
                     {done && <Icon name="check" size={12} />} {label}
                   </span>
                   <span className="flex gap-1">
+                    {send && lvl < 3 ? (
+                      <SendDocButton
+                        kind="facture"
+                        id={id}
+                        label={`Envoyer : ${label.toLowerCase()}`}
+                        small
+                        reminderLevel={lvl as 1 | 2}
+                        recipients={send.recipients}
+                        subject={send.reminders[lvl - 1].subject}
+                        text={send.reminders[lvl - 1].text}
+                        attachment={send.attachment}
+                        alreadySent={done ? `${label} déjà envoyé pour cette facture.` : null}
+                      />
+                    ) : (
+                      <>
                     {href && (
                       <a className="btn btn-ghost btn-sm" href={href} aria-label={`Préparer l'e-mail : ${label}`}>
                         <Icon name="mail" />
@@ -139,6 +174,8 @@ export function InvoiceActions({
                     <button type="button" className="btn btn-sec btn-sm" disabled={pending} onClick={() => run(async () => (await logReminderAction(id, lvl)))}>
                       Noter envoyé
                     </button>
+                      </>
+                    )}
                   </span>
                 </div>
               );

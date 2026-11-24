@@ -11,6 +11,10 @@ import { DocSheet } from "@/components/documents/doc-sheet";
 import { PrintButton } from "@/components/documents/print-button";
 import { PdfButton } from "@/components/documents/pdf-button";
 import { InvoiceActions } from "./actions-panel";
+import { creditNoteMail, invoiceMail, mailtoHref, reminderMail, type MailText } from "@/lib/billing-mails";
+import { documentPdfFilename } from "@/lib/document-pdf";
+import { brevoReady } from "@/server/brevo";
+import { lastDocumentSend } from "@/server/queries";
 
 export const metadata = { title: "Facture" };
 
@@ -25,18 +29,23 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
   const creditFor = iv.creditForId ? (await db.select({ number: schema.invoices.number }).from(schema.invoices).where(eq(schema.invoices.id, iv.creditForId)).limit(1))[0]?.number : null;
   const credit = iv.kind === "facture" && iv.status === "annulee" ? (await db.select({ id: schema.invoices.id, number: schema.invoices.number }).from(schema.invoices).where(eq(schema.invoices.creditForId, iv.id)).limit(1))[0] : null;
   const contact = iv.company.contacts.find((c) => c.email);
-  const signature = `\n\nBien cordialement,\n${s.legalName || s.tradeName}\n${s.tradeName}${s.phone ? `\n${s.phone}` : ""}`;
-  const pay = `${s.iban ? `\nIBAN : ${s.iban}` : ""}${s.payLink ? `\nPaiement en ligne : ${s.payLink}` : ""}`;
+  const sender = { legalName: s.legalName, tradeName: s.tradeName, phone: s.phone, iban: s.iban, payLink: s.payLink, latePenalty: s.latePenalty };
   const late = daysBetween(iv.dueDate, t);
-  const mail = (subject: string, body: string) => (contact ? `mailto:${contact.email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}` : null);
-  const ref = `facture ${iv.number} du ${fd(iv.issueDate)} (${eur(iv.totals.rest)})`;
-  const hello = `Bonjour ${contact?.firstName ?? ""},\n\n`;
-  const mailtoSend = mail(`Facture ${iv.number} — ${iv.subject}`, `${hello}Vous trouverez ci-joint la facture ${iv.number} pour « ${iv.subject} », d'un montant de ${eur(iv.totals.ttc)}, payable au plus tard le ${fd(iv.dueDate)}.${pay}${signature}`);
-  const mailtoReminders = [
-    mail(`Rappel — facture ${iv.number}`, `${hello}Sauf erreur de ma part, je n'ai pas encore reçu le règlement de la ${ref}, arrivée à échéance le ${fd(iv.dueDate)}. Il s'agit peut-être d'un simple oubli : pourriez-vous vérifier de votre côté ?${pay}${signature}`),
-    mail(`Relance — facture ${iv.number} échue depuis ${Math.max(0, late)} jours`, `${hello}Malgré mon précédent rappel, la ${ref} reste impayée à ce jour, ${Math.max(0, late)} jours après son échéance.\n\nJe vous remercie de procéder au règlement sous 8 jours. Pour rappel, des pénalités de retard (${s.latePenalty}) et une indemnité forfaitaire de 40 € pour frais de recouvrement sont exigibles.${pay}${signature}`),
-    mail(`Mise en demeure de payer — facture ${iv.number}`, `${hello}Par la présente, je vous mets en demeure de régler la ${ref}, échue le ${fd(iv.dueDate)}, dans un délai de 8 jours à compter de la réception de ce courrier.\n\nÀ défaut, j'engagerai sans autre préavis la procédure de recouvrement adaptée (injonction de payer). Les pénalités de retard et l'indemnité forfaitaire de 40 € restent dues.\n\nUne mise en demeure s'envoie de préférence par lettre recommandée avec accusé de réception.${signature}`),
-  ];
+  const firstName = contact?.firstName ?? "";
+  const sendMail = iv.kind === "avoir" ? creditNoteMail({ number: iv.number, creditFor: creditFor ?? "", totalTtcCents: iv.totals.ttc, firstName, sender }) : invoiceMail({ number: iv.number, subject: iv.subject, totalTtcCents: iv.totals.ttc, dueDate: iv.dueDate, firstName, sender });
+  const reminderMails = ([1, 2, 3] as const).map((lvl) => reminderMail(lvl, { number: iv.number, issueDate: iv.issueDate, dueDate: iv.dueDate, restCents: iv.totals.rest, lateDays: late, firstName, sender }));
+  const mailtoSend = mailtoHref(contact?.email, sendMail);
+  const mailtoReminders = reminderMails.map((m) => mailtoHref(contact?.email, m));
+  const lastSent = brevoReady() && !isDraftNumber(iv.number) ? await lastDocumentSend(iv.companyId, `${iv.kind === "avoir" ? "Avoir" : "Facture"} ${iv.number} envoy`) : null;
+  const send = brevoReady() && !isDraftNumber(iv.number)
+    ? {
+        recipients: iv.company.contacts.filter((c) => c.email).map((c) => ({ email: c.email, name: `${c.firstName} ${c.lastName}`.trim() })),
+        attachment: documentPdfFilename(iv.kind === "avoir" ? "avoir" : "facture", iv.number),
+        mail: sendMail,
+        reminders: [reminderMails[0], reminderMails[1]] as [MailText, MailText],
+        alreadySent: lastSent ? `Déjà envoyé le ${fdt(lastSent.createdAt)} (${lastSent.text}). Un nouvel envoi repartira avec le PDF.` : null,
+      }
+    : null;
   const title = iv.kind === "avoir" ? `Avoir ${iv.number}` : isDraftNumber(iv.number) ? "Facture (brouillon)" : `Facture ${iv.number}`;
   return (
     <>
@@ -87,6 +96,7 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
             reminders={iv.reminders.map((r) => r.level)}
             mailtoSend={mailtoSend}
             mailtoReminders={mailtoReminders}
+            send={send}
           />
           {credit && (
             <Card title="Avoir">

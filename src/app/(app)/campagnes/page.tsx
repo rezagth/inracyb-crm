@@ -1,11 +1,11 @@
-import { eq, gte, sql } from "drizzle-orm";
+import { and, eq, gte, ne, sql } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { prospectList } from "@/server/queries";
 import { getSettings } from "@/server/core";
 import { brevoConfig, brevoReady } from "@/server/brevo";
 import { appUrl, checkServicePauses, crossHistories, getDailyState, optoutSet, restDays } from "@/server/campaigns";
 import { PAUSE_RULE, entryExclusion, ENTRY_EXCLUSION_LABEL, RAMP_EVERY, serviceOf } from "@/lib/campaign";
-import { BOUNCE_REASONS, REASON } from "@/lib/brevo-events";
+import { BILLING_SERVICE, BOUNCE_REASONS, REASON } from "@/lib/brevo-events";
 import { today } from "@/lib/format";
 import { siteFromNotes } from "@/lib/contact-extract";
 import { DIAGNOSTIC_FRESH_DAYS, hookOf, parseChecks, targetsOf, usableDiagnostic } from "@/lib/diagnostic";
@@ -79,7 +79,7 @@ export default async function CampagnesPage() {
   try {
     const since = new Date(Date.now() - 7 * 86_400_000);
     const run = (await db.select().from(schema.mailRuns).orderBy(sql`${schema.mailRuns.createdAt} desc`).limit(1))[0];
-    const ev = await db.select({ type: schema.mailEvents.type, n: sql<number>`count(*)` }).from(schema.mailEvents).where(gte(schema.mailEvents.createdAt, since)).groupBy(schema.mailEvents.type);
+    const ev = await db.select({ type: schema.mailEvents.type, n: sql<number>`count(*)` }).from(schema.mailEvents).where(and(gte(schema.mailEvents.createdAt, since), ne(schema.mailEvents.service, BILLING_SERVICE))).groupBy(schema.mailEvents.type);
     health = { missing: false, lastRun: run ? { at: run.createdAt.toISOString(), source: run.source, ok: run.ok, message: run.message } : null, events: Object.fromEntries(ev.map((e) => [e.type, Number(e.n)])) };
   } catch {
     health = { ...health, missing: true };

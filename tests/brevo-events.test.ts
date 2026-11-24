@@ -28,3 +28,21 @@ test("erreur Brevo : l'adresse IP non reconnue est expliquée, la clé n'est jam
   assert.match(explainBrevoError(401, { message: "Key not found" }), /BREVO_API_KEY/);
   assert.ok(!explainBrevoError(401, { message: "Key not found" }).includes("api-key"));
 });
+
+test("mail de facturation : reconnu par son étiquette, quelle que soit la forme des tags Brevo", async () => {
+  const { isBillingMail } = await import("../src/lib/brevo-events");
+  assert.equal(isBillingMail(["facturation", "facture"]), true);
+  assert.equal(isBillingMail('["Facturation","devis"]'), true);
+  assert.equal(isBillingMail("facturation"), true);
+  for (const t of [["crm", "prospection", "audit"], "diagnostic", null, undefined, 42, "[pas du json"]) assert.equal(isBillingMail(t), false, String(t));
+});
+
+test("mail de facturation : un rebond, une plainte ou une désinscription donnent une tâche, jamais une désinscription", async () => {
+  const { billingEventTask } = await import("../src/lib/brevo-events");
+  assert.ok(billingEventTask("rebond", "daf@client.fr", "Facture F-2026-001 — Audit")?.startsWith("Adresse de facturation à corriger : daf@client.fr"));
+  assert.ok(billingEventTask("invalide", "x@y.fr", "")?.includes("x@y.fr"));
+  assert.ok(billingEventTask("spam", "x@y.fr", "")?.includes("appeler le client"));
+  assert.ok(billingEventTask("desinscrit", "x@y.fr", "")?.includes("vérifier avec le client"));
+  assert.equal(billingEventTask("delivre", "x@y.fr", ""), null);
+  assert.equal(billingEventTask("rebond_temporaire", "x@y.fr", ""), null);
+});

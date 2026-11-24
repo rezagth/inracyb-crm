@@ -26,8 +26,15 @@ test("validation d'adresse : refuse les listes, les espaces et les formats cass�
 
 test("messages d'erreur utiles et sans fuite de clé", () => {
   assert.match(explainBrevoError(401, { message: "Key not found" }), /BREVO_API_KEY/);
-  assert.match(explainBrevoError(400, { message: "Sender is invalid" }), /valide contact@infracyb\.fr/);
+  assert.match(explainBrevoError(400, { message: "Sender is invalid" }), /valide l'adresse d'envoi.*MAIL_BILLING_FROM_EMAIL/);
   assert.match(explainBrevoError(403, { message: "account not activated" }), /account not activated/);
   assert.match(explainBrevoError(429, null), /réessaie/);
   assert.ok(!explainBrevoError(500, null).includes("api-key"));
+});
+
+test("pièce jointe : transmise à Brevo sous le champ attachment ; absente si la liste est vide", () => {
+  const p = buildBrevoPayload({ ...base, attachments: [{ name: "Facture-F-2026-001.pdf", contentBase64: "JVBERi0=" }] });
+  assert.deepEqual((p as { attachment?: unknown }).attachment, [{ name: "Facture-F-2026-001.pdf", content: "JVBERi0=" }]);
+  assert.ok(!("attachment" in buildBrevoPayload({ ...base, attachments: [] })));
+  assert.ok(!("attachment" in buildBrevoPayload(base)));
 });

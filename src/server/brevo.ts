@@ -20,9 +20,20 @@ export function brevoReady(): boolean {
   return !!c.apiKey && EMAIL_RE.test(c.fromEmail);
 }
 
+/**
+ * Expéditeur des devis, factures et relances : MAIL_BILLING_FROM_EMAIL (ex. facturation@ton-domaine),
+ * à valider dans Brevo (Expéditeurs). À défaut, l'expéditeur habituel du CRM.
+ */
+export function billingSender(): { email: string; name: string } {
+  const c = brevoConfig();
+  const email = (process.env.MAIL_BILLING_FROM_EMAIL || "").trim();
+  const name = (process.env.MAIL_BILLING_FROM_NAME || "").trim();
+  return EMAIL_RE.test(email) ? { email, name: name || c.fromName } : { email: c.fromEmail, name: name || c.fromName };
+}
+
 export type SendResult = { ok: true; messageId: string } | { ok: false; error: string };
 
-export async function sendBrevoMail(input: Omit<MailInput, "from" | "replyTo"> & { replyTo?: string }): Promise<SendResult> {
+export async function sendBrevoMail(input: Omit<MailInput, "from" | "replyTo"> & { replyTo?: string; from?: { email: string; name: string } }): Promise<SendResult> {
   const c = brevoConfig();
   if (!c.apiKey) return { ok: false, error: "Brevo n'est pas configuré : ajoute BREVO_API_KEY dans .env (et dans Vercel)." };
   if (!EMAIL_RE.test(input.to.email)) return { ok: false, error: "Adresse e-mail du destinataire invalide." };
@@ -30,7 +41,7 @@ export async function sendBrevoMail(input: Omit<MailInput, "from" | "replyTo"> &
     const res = await fetch(BREVO_ENDPOINT, {
       method: "POST",
       headers: { "api-key": c.apiKey, "content-type": "application/json", accept: "application/json" },
-      body: JSON.stringify(buildBrevoPayload({ ...input, from: { email: c.fromEmail, name: c.fromName }, replyTo: input.replyTo ?? c.replyTo })),
+      body: JSON.stringify(buildBrevoPayload({ ...input, from: input.from ?? { email: c.fromEmail, name: c.fromName }, replyTo: input.replyTo ?? c.replyTo })),
       signal: AbortSignal.timeout(15_000),
       cache: "no-store",
     });

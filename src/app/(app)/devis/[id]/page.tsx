@@ -4,12 +4,16 @@ import { getQuote } from "@/server/queries";
 import { getSettings } from "@/server/core";
 import { INVOICE_STATUS, QUOTE_STATUS } from "@/lib/constants";
 import { isDraftNumber } from "@/lib/billing";
-import { eur, fd } from "@/lib/format";
+import { eur, fd, fdt } from "@/lib/format";
 import { Badge, Card, PageHeader } from "@/components/ui";
 import { DocSheet } from "@/components/documents/doc-sheet";
 import { PrintButton } from "@/components/documents/print-button";
 import { PdfButton } from "@/components/documents/pdf-button";
 import { QuoteActions } from "./actions-panel";
+import { mailtoHref, quoteMail } from "@/lib/billing-mails";
+import { documentPdfFilename } from "@/lib/document-pdf";
+import { brevoReady } from "@/server/brevo";
+import { lastDocumentSend } from "@/server/queries";
 
 export const metadata = { title: "Devis" };
 
@@ -20,10 +24,16 @@ export default async function QuotePage({ params }: { params: Promise<{ id: stri
   const s = (await getSettings());
   const st = QUOTE_STATUS[q.status] ?? { label: q.status, tone: "neu" as const };
   const contact = q.company.contacts.find((c) => c.email);
-  const mailto = contact
-    ? `mailto:${contact.email}?subject=${encodeURIComponent(`Devis ${q.number} — ${q.subject}`)}&body=${encodeURIComponent(
-        `Bonjour ${contact.firstName},\n\nComme convenu, vous trouverez ci-joint le devis ${q.number} pour « ${q.subject} », d'un montant de ${eur(q.totals.ht)} HT, valable jusqu'au ${fd(q.validUntil)}.\n\nPour l'accepter, il suffit de me le retourner signé avec la mention « Bon pour accord ». Je reste disponible pour en parler.\n\nBien cordialement,\n${s.legalName || s.tradeName}\n${s.tradeName}`,
-      )}`
+  const quoteMailText = quoteMail({ number: q.number, subject: q.subject, totalHtCents: q.totals.ht, validUntil: q.validUntil, firstName: contact?.firstName ?? "", sender: { legalName: s.legalName, tradeName: s.tradeName, phone: s.phone, iban: s.iban, payLink: s.payLink, latePenalty: s.latePenalty } });
+  const mailto = mailtoHref(contact?.email, quoteMailText);
+  const lastSent = brevoReady() && !isDraftNumber(q.number) ? await lastDocumentSend(q.companyId, `Devis ${q.number} envoy`) : null;
+  const send = brevoReady() && !isDraftNumber(q.number)
+    ? {
+        recipients: q.company.contacts.filter((c) => c.email).map((c) => ({ email: c.email, name: `${c.firstName} ${c.lastName}`.trim() })),
+        attachment: documentPdfFilename("devis", q.number),
+        mail: quoteMailText,
+        alreadySent: lastSent ? `Déjà envoyé le ${fdt(lastSent.createdAt)} (${lastSent.text}). Un nouvel envoi repartira avec le PDF.` : null,
+      }
     : null;
   return (
     <>
@@ -63,7 +73,7 @@ export default async function QuotePage({ params }: { params: Promise<{ id: stri
           signedAt={q.signedAt}
         />
         <aside className="no-print flex flex-col gap-4 xl:sticky xl:top-4 xl:self-start">
-          <QuoteActions id={q.id} status={q.status} remainingHt={q.totalHtCents - q.invoicedHt} mailto={mailto} />
+          <QuoteActions id={q.id} status={q.status} remainingHt={q.totalHtCents - q.invoicedHt} mailto={mailto} send={send} />
           {q.invoices.length > 0 && (
             <Card title="Factures liées">
               <ul>

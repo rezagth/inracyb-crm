@@ -15,6 +15,8 @@ export type MailInput = {
   tags?: string[];
   /** En-têtes personnalisés, par exemple List-Unsubscribe pour la désinscription en un clic. */
   headers?: Record<string, string>;
+  /** Pièces jointes : nom du fichier et contenu en base64 (ex. le PDF d'une facture). */
+  attachments?: { name: string; contentBase64: string }[];
 };
 
 /** Corps JSON attendu par Brevo : texte brut uniquement (meilleure délivrabilité pour de la prospection 1 à 1). */
@@ -27,6 +29,7 @@ export function buildBrevoPayload(i: MailInput) {
     textContent: i.text,
     ...(i.tags?.length ? { tags: i.tags } : {}),
     ...(i.headers && Object.keys(i.headers).length ? { headers: i.headers } : {}),
+    ...(i.attachments?.length ? { attachment: i.attachments.map((a) => ({ name: a.name, content: a.contentBase64 })) } : {}),
   };
 }
 
@@ -36,7 +39,7 @@ export function explainBrevoError(status: number, body: unknown): string {
   const detail = msg ? ` (Brevo : ${msg.slice(0, 200)})` : "";
   if (/unrecogni[sz]ed ip|authori[sz]ed.?ip|ip address/i.test(msg)) return `Brevo bloque l'adresse IP du CRM : désactive le blocage des IP inconnues dans Brevo (Sécurité, IPs autorisées).${detail}`;
   if (status === 401) return `Brevo refuse la clé API : vérifie BREVO_API_KEY (dans Vercel aussi) et qu'elle n'a pas été supprimée.${detail}`;
-  if (status === 400 && /sender/i.test(msg)) return "Brevo refuse l'expéditeur : valide contact@infracyb.fr dans Brevo (Expéditeurs) et authentifie le domaine.";
+  if (status === 400 && /sender/i.test(msg)) return "Brevo refuse l'expéditeur : valide l'adresse d'envoi (MAIL_FROM_EMAIL, ou MAIL_BILLING_FROM_EMAIL pour les factures) dans Brevo (Expéditeurs) et authentifie le domaine.";
   if (status === 402 || status === 403) return `Brevo a refusé l'envoi${msg ? " : " + msg : ""}. Vérifie le compte (téléphone à valider, quota, activation).`;
   if (status === 429) return "Brevo limite le débit : réessaie dans une minute.";
   return `Envoi refusé par Brevo (${status})${msg ? " : " + msg : ""}.`;

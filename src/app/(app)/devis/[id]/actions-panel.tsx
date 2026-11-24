@@ -5,10 +5,13 @@ import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { acceptQuoteAction, deleteDraftAction, emitQuoteAction, invoiceFromQuoteAction, refuseQuoteAction } from "@/server/actions/documents";
 import { Icon } from "@/components/icon";
+import { SendDocButton, type Recipient } from "@/components/documents/send-doc-button";
+
+export type QuoteSend = { recipients: Recipient[]; attachment: string; mail: { subject: string; text: string }; alreadySent: string | null };
 
 type R = { ok: true; id: string; message?: string } | { ok: false; error: string };
 
-export function QuoteActions({ id, status, remainingHt, mailto }: { id: string; status: string; remainingHt: number; mailto: string | null }) {
+export function QuoteActions({ id, status, remainingHt, mailto, send }: { id: string; status: string; remainingHt: number; mailto: string | null; send: QuoteSend | null }) {
   const router = useRouter();
   const [pending, start] = useTransition();
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
@@ -56,7 +59,10 @@ export function QuoteActions({ id, status, remainingHt, mailto }: { id: string; 
       )}
       {status === "envoye" && (
         <>
-          {mailto && (
+          {send && (
+            <SendDocButton kind="devis" id={id} label="Envoyer au client" primary recipients={send.recipients} subject={send.mail.subject} text={send.mail.text} attachment={send.attachment} alreadySent={send.alreadySent} />
+          )}
+          {!send && mailto && (
             <a className="btn btn-sec" href={mailto}>
               <Icon name="mail" />
               Préparer l&apos;e-mail d&apos;envoi

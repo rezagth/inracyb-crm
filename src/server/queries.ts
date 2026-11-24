@@ -207,3 +207,15 @@ export async function prospectList() {
     };
   });
 }
+
+/** Dernier envoi par e-mail d'un document (journal de l'entreprise), pour prévenir un double envoi. */
+export async function lastDocumentSend(companyId: string, textPrefix: string) {
+  return (
+    await db
+      .select({ text: schema.events.text, createdAt: schema.events.createdAt })
+      .from(schema.events)
+      .where(and(eq(schema.events.companyId, companyId), eq(schema.events.type, "mail"), like(schema.events.text, `${textPrefix.replace(/[%_\\]/g, "\\$&")}%`)))
+      .orderBy(desc(schema.events.createdAt))
+      .limit(1)
+  )[0] ?? null;
+}

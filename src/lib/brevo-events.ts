@@ -40,3 +40,39 @@ export function classifyBrevoEvent(event: unknown): Classified | null {
       return null;
   }
 }
+
+/** Service des mails de facturation (devis, factures, relances) : jamais compté dans les pauses ni le bilan de la prospection. */
+export const BILLING_SERVICE = "facturation";
+
+/** true si le mail porte l'étiquette « facturation » (tags Brevo : tableau, chaîne JSON ou chaîne simple). */
+export function isBillingMail(tags: unknown): boolean {
+  let list: unknown = tags;
+  if (typeof list === "string") {
+    try {
+      list = JSON.parse(list);
+    } catch {
+      list = [list];
+    }
+  }
+  return Array.isArray(list) && list.some((t) => typeof t === "string" && t.toLowerCase() === BILLING_SERVICE);
+}
+
+/**
+ * Problème sur un mail de facturation : une tâche pour corriger l'adresse ou appeler le client.
+ * Jamais de désinscription automatique (c'est un client, pas un prospect). null : rien à faire.
+ */
+export function billingEventTask(kind: EventKind, email: string, subject: string): string | null {
+  const about = subject ? ` (« ${subject.slice(0, 80)} »)` : "";
+  switch (kind) {
+    case "rebond":
+    case "invalide":
+    case "bloque":
+      return `Adresse de facturation à corriger : ${email}, mail non remis${about}`;
+    case "spam":
+      return `Mail de facturation signalé comme indésirable par ${email}${about} : appeler le client`;
+    case "desinscrit":
+      return `${email} a cliqué « se désinscrire » sur un mail de facturation${about} : vérifier avec le client`;
+    default:
+      return null;
+  }
+}
