@@ -19,9 +19,12 @@ export function parseDepartements(raw: string): string[] {
   return [...new Set(raw.split(/[\s,;]+/).map((d) => d.trim().toUpperCase()).filter((d) => DEPARTEMENT_RE.test(d)))].slice(0, 30);
 }
 
-/** Recherches à mener pour un segment : chaque secteur interrogeable du segment × chaque département (ou la France entière). */
-export function searchPlan(segment: Segment, departements: string[]): { sector: Sector; departement: string }[] {
-  const sectors = SEGMENT_SECTORS[segment].filter((s): s is Sector => s in SECTOR_SEARCH);
+/**
+ * Recherches à mener pour un segment : chaque secteur interrogeable du segment × chaque département (ou la France entière).
+ * `exclude` : secteurs à ne pas chercher (cabinets réservés aux prescripteurs quand l'alimentation des prescripteurs est éteinte).
+ */
+export function searchPlan(segment: Segment, departements: string[], exclude: readonly string[] = []): { sector: Sector; departement: string }[] {
+  const sectors = SEGMENT_SECTORS[segment].filter((s): s is Sector => s in SECTOR_SEARCH && !exclude.includes(s));
   const depts = departements.length ? departements : [""];
   return sectors.flatMap((sector) => depts.map((departement) => ({ sector, departement })));
 }
@@ -43,7 +46,7 @@ export function readCursors(json: string): Partial<Record<Segment, Cursor>> {
     const out: Partial<Record<Segment, Cursor>> = {};
     for (const [k, c] of Object.entries(v as Record<string, unknown>)) {
       const x = c as { combo?: unknown; page?: unknown } | null;
-      if ((k === "editeurs" || k === "cabinets") && x && Number.isInteger(x.combo) && Number.isInteger(x.page) && (x.combo as number) >= 0 && (x.page as number) >= 1) out[k] = { combo: x.combo as number, page: x.page as number };
+      if ((k === "editeurs" || k === "cabinets" || k === "immobilier") && x && Number.isInteger(x.combo) && Number.isInteger(x.page) && (x.combo as number) >= 0 && (x.page as number) >= 1) out[k] = { combo: x.combo as number, page: x.page as number };
     }
     return out;
   } catch {
@@ -54,14 +57,16 @@ export function readCursors(json: string): Partial<Record<Segment, Cursor>> {
 /** Nombre de mails d'une séquence, et jours ouvrés sur lesquels elle s'étale (J0 à J+14). */
 export const MAILS_PER_PROSPECT = 4;
 export const SEQUENCE_BUSINESS_DAYS = 10;
+/** Séquence Prescripteurs : premier message et relance à J+7. */
+export const PRESCRIBER_MAILS = 2;
 
 /**
  * Combien d'entreprises on peut encore inscrire dans un service sans dépasser ce que son plafond peut envoyer :
  * les mails restant à envoyer aux entreprises déjà en séquence, plus les 4 mails de chaque nouvelle, doivent tenir
  * dans le plafond quotidien × la durée d'une séquence. Jamais plus de premiers mails en attente que le plafond d'un jour.
  */
-export function enrolSlots(dailyLimit: number, remainingMails: number, waitingFirstMail: number): number {
-  const byVolume = Math.floor((dailyLimit * SEQUENCE_BUSINESS_DAYS - remainingMails) / MAILS_PER_PROSPECT);
+export function enrolSlots(dailyLimit: number, remainingMails: number, waitingFirstMail: number, mailsPerProspect = MAILS_PER_PROSPECT): number {
+  const byVolume = Math.floor((dailyLimit * SEQUENCE_BUSINESS_DAYS - remainingMails) / mailsPerProspect);
   return Math.max(0, Math.min(byVolume, dailyLimit - waitingFirstMail));
 }
 

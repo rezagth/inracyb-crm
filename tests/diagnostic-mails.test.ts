@@ -29,14 +29,14 @@ test("les phrases du code sont celles du fichier validé, caractère pour caract
   const t3 = table("## Tableau 3");
   assert.equal(t3.length, 6);
   for (const [label, fix] of t3) for (const k of KEY[label]) assert.equal(HOOK_TEXT[k as keyof typeof HOOK_TEXT].fix, fix, label);
-  assert.deepEqual(table("## Tableau 2").map(([f, a, b]) => [f, a, b]), (["A", "B"] as const).map((f) => [f, IMPACT[f].editeurs, IMPACT[f].cabinets]));
+  assert.deepEqual(table("## Tableau 2").map(([f, a, b, c]) => [f, a, b, c]), (["A", "B"] as const).map((f) => [f, IMPACT[f].editeurs, IMPACT[f].cabinets, IMPACT[f].immobilier]));
   assert.deepEqual(table("## Tableau 4"), [["HSTS absent", SECONDARY_TEXT["hsts-absent"]]]);
   assert.deepEqual(Object.keys(SECONDARY_TEXT), ["hsts-absent"]);
   assert.deepEqual(Object.keys(HOOK_TEXT).sort(), [...HOOK_VARIANTS].sort()); // chaque accroche a ses phrases, et rien d'autre
   assert.ok(!(HOOK_VARIANTS as readonly string[]).includes("hsts-absent"));
 
   // Texte commun de chaque segment : objet et corps de chaque étape.
-  for (const [segment, title] of [["editeurs", "## Segment 1"], ["cabinets", "## Segment 2"]] as const) {
+  for (const [segment, title] of [["editeurs", "## Segment 1"], ["cabinets", "## Segment 2"], ["immobilier", "## Segment 3"]] as const) {
     let part = md.slice(md.indexOf(title));
     const next = part.indexOf("\n## ", 5);
     if (next > 0) part = part.slice(0, next);
@@ -142,8 +142,8 @@ test("valeurs venues de la fiche : jamais interprétées comme des champs, jamai
 });
 
 test("segments : secteurs admis et codes NAF", () => {
-  assert.deepEqual(SEGMENT_SECTORS, { editeurs: ["Numérique"], cabinets: ["Expertise comptable", "Juridique", "Notariat", "Courtage"] });
-  assert.deepEqual(["Numérique", "Juridique", "Notariat", "Expertise comptable", "Courtage", "Santé", "Immobilier", "Autres"].map(segmentOfSector), ["editeurs", "cabinets", "cabinets", "cabinets", "cabinets", null, null, null]);
+  assert.deepEqual(SEGMENT_SECTORS, { editeurs: ["Numérique"], cabinets: ["Expertise comptable", "Juridique", "Notariat", "Courtage"], immobilier: ["Immobilier"] });
+  assert.deepEqual(["Numérique", "Juridique", "Notariat", "Expertise comptable", "Courtage", "Santé", "Immobilier", "Autres"].map(segmentOfSector), ["editeurs", "cabinets", "cabinets", "cabinets", "cabinets", null, "immobilier", null]);
   assert.deepEqual(["62.01Z", "62.02A", "58.29C", "66.22Z", "69.20Z", "69.10Z", "62.03Z"].map((n) => sectorFromNaf(n)), ["Numérique", "Numérique", "Numérique", "Courtage", "Expertise comptable", "Juridique", "Autres"]);
   assert.deepEqual(SECTOR_SEARCH["Numérique"]?.naf, ["62.01Z", "62.02A", "58.29C"]);
   assert.deepEqual(SECTOR_SEARCH.Courtage?.naf, ["66.22Z"]);
@@ -178,4 +178,16 @@ test("liens : synthèse à J+3, réservation à J+7, jamais à J0 ni J+14 ; offr
   for (const reportUrl of ["http://crm.test/r/x", "https://crm.test/r/x y", "https://crm.test/{prenom}", "javascript:alert(1)"]) assert.ok(ok({ step: 1, reportUrl }).body.includes(EXTRA_TEXT.syntheseSansLien));
   // Offre de messagerie sans prix : le mail ne part pas.
   assert.match(ko({ step: 2, checks: [], prixPublic: "" }), /prix_public/);
+});
+
+test("segment Immobilier : secteur Immobilier seulement, texte d'impact et J+7 propres, offre Pack et réservation comme ailleurs", () => {
+  assert.equal(segmentOfSector("Immobilier"), "immobilier");
+  assert.deepEqual(SEGMENT_SECTORS.immobilier, ["Immobilier"]);
+  const j0 = ok({ segment: "immobilier" });
+  assert.ok(j0.body.includes(IMPACT.A.immobilier));
+  const j7 = ok({ segment: "immobilier", step: 2, checks: [], pilotOpen: true, calUrl: "https://cal.com/jean/15min" });
+  assert.equal(j7.subject, "Les virements de vos clients et les messages à votre nom");
+  assert.match(j7.body, /loyers, dépôts de garantie et appels de fonds/);
+  assert.match(j7.body, /Pack Courrier sécurisé, à 290 € HT/);
+  assert.match(j7.body, /créneau directement : https:\/\/cal\.com\/jean\/15min/);
 });

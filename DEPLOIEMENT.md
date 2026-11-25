@@ -187,3 +187,18 @@ Les deux fichiers sont rejouables sans danger. Sans eux, la fiche entreprise et 
 - **Consultation** : une ouverture humaine (robots, antivirus de messagerie et ouvertures dans les 2 minutes après un envoi écartés) note « Rapport de diagnostic consulté » sur la fiche et met un appel du jour en tête de la file.
 - **Textes Diagnostic** : J+3 contient le lien de la synthèse, J+7 le Pack (prix pilote tant qu'aucun devis accepté n'a épuisé les 3 places) et le lien de réservation de Paramètres > Intégrations (sans lien Cal, la phrase de réservation est omise). Tableau 5 de `textes-campagne-diagnostic-v2.md`.
 - **Page Appels** : file « À appeler aujourd'hui » (tâches `kind = 'appel'`), résultat en un clic.
+
+## Phase J : volume d'envoi
+
+**Migration, avant de déployer le code** (branche de sauvegarde Neon d'abord) :
+
+```bash
+psql "$PROD_URL" -X -v ON_ERROR_STOP=1 -f drizzle-manuel-phase-j.sql
+```
+
+- **Stock d'abord** : chaque passage de l'alimentation diagnostique et inscrit d'abord les entreprises déjà vérifiées, puis cherche de nouvelles entreprises. La tâche de 6 h 30 (`/api/cron/diagnostics`) traite aussi ce stock.
+- **Domaine d'envoi** : la page Campagnes (onglet Diagnostic) affiche SPF, DKIM de Brevo et DMARC du domaine de `MAIL_FROM_EMAIL`. Tant que DMARC n'est pas en `quarantine` ou `reject` à 100 % avec un DKIM valide, le diagnostic reste plafonné à 10 mails par jour, quelle que soit la cible. Le rapport du lundi le signale.
+- **Montée en charge** : 4 → 6 → 8 → 10 depuis le premier envoi, puis 15 → 20 → 25 → 30 (un palier tous les 2 jours ouvrés) à partir du jour où le domaine d'envoi est devenu strict. Cible : `MAIL_DAILY_LIMIT_DIAGNOSTIC` (30 recommandé). Si le domaine redevient non strict, la montée repart du début.
+- **Sous-domaine d'envoi (recommandé)** : par exemple `contact@go.infracyb.fr` authentifié dans Brevo, puis `MAIL_FROM_EMAIL` = cette adresse et `MAIL_REPLY_TO=contact@infracyb.fr` (les réponses restent dans la boîte lue par le CRM). Sans DMARC propre, le sous-domaine suit `sp=` (sinon `p=`) du domaine principal.
+- **Segments** : le segment Cabinets ne cherche plus les secteurs réservés aux prescripteurs ; nouveau segment Immobilier (agences, syndics, administrateurs de biens ; textes : segment 3 de `textes-campagne-diagnostic-v2.md`).
+- **Prescripteurs automatiques** : case « Alimenter la campagne Prescripteurs » sur la page Alimentation (éteinte par défaut). Les cabinets réservés trouvés entrent dans la campagne permanente Prescripteurs (plafond `MAIL_DAILY_LIMIT_PRESCRIPTEUR`).

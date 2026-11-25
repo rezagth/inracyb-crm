@@ -6,12 +6,12 @@
 import { clean, hookOf, mailable, type Check, type HookVariant } from "./diagnostic";
 import { fd } from "./format";
 
-export type Segment = "editeurs" | "cabinets";
-export const SEGMENTS: Segment[] = ["editeurs", "cabinets"];
-export const SEGMENT_LABEL: Record<Segment, string> = { editeurs: "Éditeurs, ESN, agences digitales", cabinets: "Cabinets comptables, juridiques, courtiers" };
+export type Segment = "editeurs" | "cabinets" | "immobilier";
+export const SEGMENTS: Segment[] = ["editeurs", "cabinets", "immobilier"];
+export const SEGMENT_LABEL: Record<Segment, string> = { editeurs: "Éditeurs, ESN, agences digitales", cabinets: "Cabinets comptables, juridiques, courtiers", immobilier: "Agences immobilières, syndics, administrateurs de biens" };
 export const isSegment = (s: string): s is Segment => (SEGMENTS as string[]).includes(s);
 /** Secteurs du CRM admis dans chaque segment : le texte d'impact n'a de sens que pour eux. Une entreprise d'un autre secteur n'entre pas. */
-export const SEGMENT_SECTORS: Record<Segment, string[]> = { editeurs: ["Numérique"], cabinets: ["Expertise comptable", "Juridique", "Notariat", "Courtage"] };
+export const SEGMENT_SECTORS: Record<Segment, string[]> = { editeurs: ["Numérique"], cabinets: ["Expertise comptable", "Juridique", "Notariat", "Courtage"], immobilier: ["Immobilier"] };
 export const segmentOfSector = (sector: string): Segment | null => SEGMENTS.find((s) => SEGMENT_SECTORS[s].includes(sector)) ?? null;
 
 type Family = "A" | "B";
@@ -29,8 +29,8 @@ export const HOOK_TEXT: Record<HookVariant, { family: Family; subject: string; f
 
 /** Tableau 2 : phrase d'impact, par famille de constat et par segment. */
 export const IMPACT: Record<Family, Record<Segment, string>> = {
-  A: { editeurs: "Ces éléments reviennent souvent dans les questionnaires de sécurité que les grands clients envoient avant de signer.", cabinets: "Pour un cabinet qui échange chaque jour avec ses clients sur des documents sensibles, c'est un point que les fraudes au faux RIB exploitent régulièrement." },
-  B: { editeurs: "Un client ou un prospect qui voit cet avertissement peut s'inquiéter avant même de vous avoir contacté.", cabinets: "Vos clients qui visitent votre site voient cet avertissement, ce qui peut les inquiéter." },
+  A: { editeurs: "Ces éléments reviennent souvent dans les questionnaires de sécurité que les grands clients envoient avant de signer.", cabinets: "Pour un cabinet qui échange chaque jour avec ses clients sur des documents sensibles, c'est un point que les fraudes au faux RIB exploitent régulièrement.", immobilier: "Pour une agence qui échange chaque jour des RIB, des quittances et des appels de fonds avec ses clients, c'est exactement la faille qu'exploitent les fraudes au faux RIB." },
+  B: { editeurs: "Un client ou un prospect qui voit cet avertissement peut s'inquiéter avant même de vous avoir contacté.", cabinets: "Vos clients qui visitent votre site voient cet avertissement, ce qui peut les inquiéter.", immobilier: "Vos clients et les candidats locataires qui visitent votre site voient cet avertissement, ce qui peut les inquiéter." },
 };
 
 /** Tableau 4 : constat secondaire, ajouté à J+3 seulement s'il s'applique. Jamais une accroche. */
@@ -59,6 +59,12 @@ export const SEQUENCE: Record<Segment, { subject: string; body: string }[]> = {
     { subject: "{objet_j0}", body: "Bonjour {prenom},\n\nJe suis [mon prénom], consultant en cybersécurité chez InfraCyb. En regardant les réglages publics de {domaine}, j'ai relevé un point : {constat_principal}.\n\n{impact}\n\nPréférez-vous que je vous envoie la synthèse d'une page, ou que je vous appelle deux minutes pour vous l'expliquer ?\n\n{signature}" },
     { subject: "Précision sur {domaine}", body: "Bonjour {prenom},\n\nUne précision utile sur le point relevé pour {domaine} : {piste_corrective}. {constat_secondaire}\n\n{synthese}\n\n{signature}" },
     { subject: "Vos clients et les messages à votre nom", body: "Bonjour {prenom},\n\nVos clients vous transmettent des documents et parfois des coordonnées bancaires par mail. S'ils reçoivent un faux message à votre nom, c'est vers vous qu'ils se retourneront. Un dossier de preuves (ce qui est en place, ce qui a été corrigé, ce qui reste à faire) permet de montrer que le sujet est maîtrisé, à vos clients comme à votre assureur.\n\n{offre_pack}\n\nJe peux vous dire en quinze minutes ce que je regarderais en priorité chez {entreprise}. Cela vous serait utile ? {prise_rdv}\n\n{signature}" },
+    { subject: "Dernier message de ma part", body: "Bonjour {prenom},\n\nJe ne vous écris plus après celui-ci. Si le sujet devient utile pour {entreprise}, la synthèse d'une page sur {domaine} reste disponible : il suffit de me répondre.\n\nBonne continuation,\n\n{signature}" },
+  ],
+  immobilier: [
+    { subject: "{objet_j0}", body: "Bonjour {prenom},\n\nJe suis [mon prénom], consultant en cybersécurité chez InfraCyb. En regardant les réglages publics de {domaine}, j'ai relevé un point : {constat_principal}.\n\n{impact}\n\nPréférez-vous que je vous envoie la synthèse d'une page, ou que je vous appelle deux minutes pour vous l'expliquer ?\n\n{signature}" },
+    { subject: "Précision sur {domaine}", body: "Bonjour {prenom},\n\nUne précision utile sur le point relevé pour {domaine} : {piste_corrective}. {constat_secondaire}\n\n{synthese}\n\n{signature}" },
+    { subject: "Les virements de vos clients et les messages à votre nom", body: "Bonjour {prenom},\n\nVos clients vous adressent loyers, dépôts de garantie et appels de fonds sur la foi de vos mails. S'ils reçoivent un faux RIB à votre nom, c'est vers vous qu'ils se retourneront. Un dossier de preuves (ce qui est en place, ce qui a été corrigé, ce qui reste à faire) permet de montrer que le sujet est maîtrisé, à vos clients comme à votre assureur.\n\n{offre_pack}\n\nJe peux vous dire en quinze minutes ce que je regarderais en priorité chez {entreprise}. Cela vous serait utile ? {prise_rdv}\n\n{signature}" },
     { subject: "Dernier message de ma part", body: "Bonjour {prenom},\n\nJe ne vous écris plus après celui-ci. Si le sujet devient utile pour {entreprise}, la synthèse d'une page sur {domaine} reste disponible : il suffit de me répondre.\n\nBonne continuation,\n\n{signature}" },
   ],
 };

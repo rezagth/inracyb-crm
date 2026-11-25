@@ -129,7 +129,12 @@ export function serviceOf(offer: string): ServiceKey {
 export const DEFAULT_DAILY_LIMIT: Record<ServiceKey, number> = { audit: 10, diagnostic: 10, prescripteur: 10 };
 export const MAX_DAILY_LIMIT = 300;
 /** Montée en charge du diagnostic : plafond par palier, un palier tous les RAMP_EVERY jours ouvrés depuis le premier envoi réel. */
-export const DIAGNOSTIC_RAMP = [4, 6, 8, 10] as const;
+export const DIAGNOSTIC_RAMP = [4, 6, 8, 10, 15, 20, 25, 30] as const;
+/** Paliers comptés depuis le premier envoi, puis paliers permis seulement avec un domaine d'envoi strict (DMARC appliqué, DKIM). */
+const BASE_RAMP = [4, 6, 8] as const;
+const EXTENDED_RAMP = [10, 15, 20, 25] as const;
+/** Plafond du diagnostic tant que le domaine d'envoi n'est pas strict (même valeur que SENDER_UNVERIFIED_CAP). */
+const SENDER_CAP = 10;
 export const RAMP_EVERY = 2;
 /** Repos entre la fin d'une séquence dans un service et l'entrée dans l'autre. */
 export const REST_DAYS_DEFAULT = 30;
@@ -176,28 +181,42 @@ export type Ramp = { /** plafond du jour */ limit: number; /** palier courant (0
  * Plafond du diagnostic aujourd'hui. Avant le premier envoi réel et le jour de cet envoi : premier palier.
  * Les paliers ne dépassent jamais la cible ; une fois le dernier palier atteint, c'est la cible qui s'applique.
  */
-export function rampLimit(firstSendOn: string | null, today: string, target: number): Ramp {
-  const stages = DIAGNOSTIC_RAMP.map((s) => Math.min(s, target));
+export function rampLimit(firstSendOn: string | null, today: string, target: number, ext: { strict: boolean; anchor: string | null } = { strict: false, anchor: null }): Ramp {
+  const base = BASE_RAMP.filter((x) => x < target);
+  const extra = EXTENDED_RAMP.filter((x) => x < target);
+  const stages = [...base, ...(ext.strict ? extra : []), ...(ext.strict || target <= SENDER_CAP ? [target] : [Math.min(target, SENDER_CAP)])];
   const elapsed = firstSendOn ? businessDaysSince(firstSendOn, today) : 0;
-  const raw = Math.floor(elapsed / RAMP_EVERY);
-  const stage = Math.min(raw, stages.length - 1);
-  return { limit: raw >= stages.length - 1 ? target : stages[stage], stage, stages, target };
+  const baseIdx = Math.floor(elapsed / RAMP_EVERY);
+  // Paliers de base (4, 6, 8, 10) comptés depuis le premier envoi ; au-delà de 10, comptés depuis le jour où le domaine
+  // d'envoi est devenu strict (ancre), pour ne jamais sauter directement au plafond visé.
+  if (baseIdx < base.length) return { limit: stages[baseIdx], stage: baseIdx, stages, target };
+  if (!ext.strict || target <= SENDER_CAP) return { limit: stages[base.length], stage: base.length, stages, target };
+  const since = ext.anchor ? businessDaysSince(ext.anchor, today) : 0;
+  const extIdx = Math.min(base.length + Math.floor(since / RAMP_EVERY), stages.length - 1);
+  return { limit: stages[extIdx], stage: extIdx, stages, target };
+}
+
+/** Les paliers de base (4, 6, 8) sont passés : la montée au-delà peut commencer (si le domaine d'envoi est strict). */
+export function baseRampDone(firstSendOn: string | null, today: string): boolean {
+  return !!firstSendOn && Math.floor(businessDaysSince(firstSendOn, today) / RAMP_EVERY) >= BASE_RAMP.length;
 }
 
 export type ServiceState = { limit: number; sent: number; remaining: number };
-export type DailyState = { audit: ServiceState; diagnostic: ServiceState & { ramp: Ramp; firstSendOn: string | null }; prescripteur: ServiceState; total: ServiceState };
+export type DailyState = { audit: ServiceState; diagnostic: ServiceState & { ramp: Ramp; firstSendOn: string | null; /** plafond retenu à 10 faute de domaine d'envoi strict */ senderCapped: boolean }; prescripteur: ServiceState; total: ServiceState };
 
 /** État du jour : plafond et envois de chaque service, plus un total global (somme des plafonds visés). */
-export function dailyState(input: { today: string; sentByOffer: Record<string, number>; firstDiagnosticSendOn: string | null; auditLimit: number; diagnosticTarget: number; prescriberLimit?: number }): DailyState {
+export function dailyState(input: { today: string; sentByOffer: Record<string, number>; firstDiagnosticSendOn: string | null; auditLimit: number; diagnosticTarget: number; prescriberLimit?: number; senderStrict?: boolean; rampAnchor?: string | null }): DailyState {
   const sent: Record<ServiceKey, number> = { audit: 0, diagnostic: 0, prescripteur: 0 };
   for (const [offer, n] of Object.entries(input.sentByOffer)) sent[serviceOf(offer)] += n;
-  const ramp = rampLimit(input.firstDiagnosticSendOn, input.today, input.diagnosticTarget);
+  const ramp = rampLimit(input.firstDiagnosticSendOn, input.today, input.diagnosticTarget, { strict: !!input.senderStrict, anchor: input.rampAnchor ?? null });
+  const senderCapped = !input.senderStrict && input.diagnosticTarget > SENDER_CAP;
+  const diagnosticCeiling = senderCapped ? SENDER_CAP : input.diagnosticTarget;
   const mk = (limit: number, s: number): ServiceState => ({ limit, sent: s, remaining: Math.max(0, limit - s) });
   const prescriberLimit = input.prescriberLimit ?? DEFAULT_DAILY_LIMIT.prescripteur;
-  const totalLimit = Math.min(MAX_DAILY_LIMIT, input.auditLimit + input.diagnosticTarget + prescriberLimit);
+  const totalLimit = Math.min(MAX_DAILY_LIMIT, input.auditLimit + diagnosticCeiling + prescriberLimit);
   return {
     audit: mk(input.auditLimit, sent.audit),
-    diagnostic: { ...mk(ramp.limit, sent.diagnostic), ramp, firstSendOn: input.firstDiagnosticSendOn },
+    diagnostic: { ...mk(ramp.limit, sent.diagnostic), ramp, firstSendOn: input.firstDiagnosticSendOn, senderCapped },
     prescripteur: mk(prescriberLimit, sent.prescripteur),
     total: mk(totalLimit, sent.audit + sent.diagnostic + sent.prescripteur),
   };

@@ -206,7 +206,8 @@ test("un passage : seules les entreprises avec adresse publiée ET téléphone e
   assert.equal((await db.select().from(schema.companies)).length, 6); // 2 existantes + 4 complètes
   assert.equal(world.placeCalls, 8); // une requête par candidat nouveau, aucune pour les doublons
   // Recherche : codes du segment, tailles ciblées, France entière.
-  assert.deepEqual(world.searches.map((x) => x.sector), ["Numérique", "Expertise comptable", "Juridique", "Notariat", "Courtage"]);
+  // Les cabinets réservés aux prescripteurs ne sont plus cherchés tant que l'alimentation des prescripteurs est éteinte.
+  assert.deepEqual(world.searches.map((x) => x.sector), ["Numérique", "Courtage", "Immobilier"]);
   assert.deepEqual(world.searches[0].effectifs, ["02", "03", "11", "12"]);
 
   // Incomplètes : jamais dans le CRM, notées hors CRM avec le motif.
@@ -463,4 +464,42 @@ test("arrêt par l'interrupteur : plus rien ne bouge, les séquences déjà comm
   assert.equal(await feedOf("Après Arrêt"), undefined);
   assert.equal((await db.select().from(schema.mailCampaignItems)).length, items);
   assert.equal((await db.select().from(schema.feedRuns)).length, runsBefore);
+});
+
+test("stock d'abord : une entreprise vérifiée est diagnostiquée même sans recherche (tâche de 6 h 30), et la recherche ne l'affame plus", async () => {
+  const { setFeedEnabledAction } = await import("../src/server/actions/feed");
+  assert.ok((await setFeedEnabledAction(true)).ok);
+  clearSearch();
+  const [co] = await db.insert(schema.companies).values({ name: "Kappa Stock", sector: "Numérique", siren: "123123123", notes: "Site web : https://kappa.fr" }).returning();
+  await db.insert(schema.contacts).values({ companyId: co.id, firstName: "Claire", lastName: "Durand", email: "contact@kappa.fr", emailSource: "site", phone: "01 40 00 00 77", isPrimary: true });
+  await db.insert(schema.feedItems).values({ companyId: co.id, segment: "editeurs", stage: "a_diagnostiquer", importedOn: T, movedOn: T });
+  world.noDmarc = new Set(["kappa.fr"]);
+  const r = await (await import("../src/server/feed")).runFeed({ deps, stockOnly: true });
+  assert.equal(world.searches.length, 0, "le passage du stock ne cherche rien");
+  assert.match(r.message, /^Stock · /);
+  assert.ok(r.diagnosed >= 1);
+  const k = await feedOf("Kappa Stock");
+  assert.ok(k && ["a_inscrire", "inscrit"].includes(k.f.stage), String(k?.f.stage));
+  const d = (await db.select().from(schema.companyDiagnostics).where(eq(schema.companyDiagnostics.companyId, co.id)))[0];
+  assert.equal(d.status, "fait");
+});
+
+test("alimentation des prescripteurs (interrupteur) : les cabinets réservés sont cherchés et inscrits dans la campagne Prescripteurs, jamais en client", async () => {
+  await settings({ enabled: true, feedPrescripteur: true, cursors: "{}", departements: "" });
+  clearSearch();
+  world.pages["Expertise comptable||1"] = [found("Sigma Expertise", "Expertise comptable", { naf: "69.20Z" })];
+  site("Sigma Expertise", "sigma-expert.fr", ["cabinet@sigma-expert.fr"], ["01 40 00 00 88"]);
+  const r = await run();
+  assert.ok(world.searches.some((x) => x.sector === "Expertise comptable"), "les cabinets réservés sont cherchés");
+  const sg = await feedOf("Sigma Expertise");
+  assert.ok(sg, JSON.stringify(r));
+  assert.equal(sg!.f.stage, "inscrit", sg!.f.reason);
+  assert.equal(sg!.f.service, "prescripteur");
+  const camp = (await db.select().from(schema.mailCampaigns).where(eq(schema.mailCampaigns.id, sg!.item.campaignId)))[0];
+  assert.deepEqual([camp.offer, camp.auto], ["prescripteur", true]);
+  // Éteint : plus aucune recherche de ces cabinets.
+  await settings({ feedPrescripteur: false, cursors: "{}" });
+  clearSearch();
+  await run();
+  assert.ok(!world.searches.some((x) => ["Expertise comptable", "Juridique", "Notariat"].includes(x.sector)));
 });

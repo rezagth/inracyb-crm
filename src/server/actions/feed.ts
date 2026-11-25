@@ -25,6 +25,7 @@ export async function setFeedEnabledAction(enabled: boolean): Promise<R> {
 const settingsZ = z.object({
   feedDiagnostic: z.boolean(),
   feedAudit: z.boolean(),
+  feedPrescripteur: z.boolean().optional(),
   departements: z.string().max(200),
   effectifs: z.array(z.string()).max(8).refine((a) => a.every((c) => EFFECTIF_CODES.includes(c)), "Taille invalide."),
   importPerSegment: z.number().int().min(0).max(200),
@@ -40,7 +41,7 @@ export async function saveFeedSettingsAction(input: unknown): Promise<R> {
   if (depts.length !== new Set(typed.map((d) => d.toUpperCase())).size) return { ok: false, error: "Départements : 2 ou 3 chiffres séparés par des virgules (ex. 75, 92, 69), ou 2A / 2B." };
   if (!p.data.effectifs.length) return { ok: false, error: "Choisis au moins une taille d'entreprise." };
   await getFeedSettings();
-  await db.update(schema.feedSettings).set({ feedDiagnostic: p.data.feedDiagnostic, feedAudit: p.data.feedAudit, departements: depts.join(","), effectifs: p.data.effectifs.join(","), importPerSegment: p.data.importPerSegment, placesDaily: p.data.placesDaily, cursors: "{}" }).where(eq(schema.feedSettings.id, 1));
+  await db.update(schema.feedSettings).set({ feedDiagnostic: p.data.feedDiagnostic, feedAudit: p.data.feedAudit, feedPrescripteur: p.data.feedPrescripteur === true, departements: depts.join(","), effectifs: p.data.effectifs.join(","), importPerSegment: p.data.importPerSegment, placesDaily: p.data.placesDaily, cursors: "{}" }).where(eq(schema.feedSettings.id, 1));
   revalidatePath("/alimentation");
   return { ok: true, message: "Réglages enregistrés. La recherche repart du début avec ces critères." };
 }

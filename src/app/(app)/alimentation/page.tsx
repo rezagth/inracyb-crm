@@ -26,7 +26,7 @@ export default async function AlimentationPage() {
     <>
       <PageHeader title="Alimentation" subtitle="Chaque jour ouvré, le CRM cherche des entreprises dans l'Annuaire des Entreprises et ne fait entrer dans le CRM que celles dont il trouve l'adresse mail publiée sur leur site ET le téléphone. Il les diagnostique puis les inscrit dans la campagne permanente de leur segment, sans dépasser les plafonds d'envoi." />
       <Alimentation
-        settings={{ enabled: s.enabled, feedDiagnostic: s.feedDiagnostic, feedAudit: s.feedAudit, departements: s.departements, effectifs: s.effectifs.split(",").filter(Boolean), importPerSegment: s.importPerSegment, placesDaily: s.placesDaily }}
+        settings={{ enabled: s.enabled, feedDiagnostic: s.feedDiagnostic, feedAudit: s.feedAudit, feedPrescripteur: s.feedPrescripteur, departements: s.departements, effectifs: s.effectifs.split(",").filter(Boolean), importPerSegment: s.importPerSegment, placesDaily: s.placesDaily }}
         sizes={EFFECTIFS}
         placesReady={o.placesReady}
         placesUsedToday={o.placesUsedToday}

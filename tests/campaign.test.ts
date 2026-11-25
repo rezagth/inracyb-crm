@@ -91,11 +91,13 @@ test("paliers du diagnostic : 4, 6, 8, 10, un palier tous les 2 jours ouvrés de
   assert.deepEqual(["2026-11-16", "2026-11-17", "2026-11-18", "2026-11-19", "2026-11-20", "2026-11-23", "2026-11-24", "2026-11-25", "2027-01-15"].map(at), [4, 4, 6, 6, 8, 8, 10, 10, 10]);
   assert.equal(at("2026-11-21"), 8); // le samedi ne fait pas avancer le palier
   assert.deepEqual(rampLimit(first, "2026-11-18", 10), { limit: 6, stage: 1, stages: [4, 6, 8, 10], target: 10 });
-  // Une cible plus basse plafonne chaque palier ; une cible plus haute ne s'applique qu'après le dernier palier.
-  assert.deepEqual(rampLimit(first, "2026-11-20", 5).stages, [4, 5, 5, 5]);
+  // Une cible plus basse plafonne les paliers ; au-delà de 10, seulement avec un domaine d'envoi strict (voir sender-check.test.ts).
+  assert.deepEqual(rampLimit(first, "2026-11-20", 5).stages, [4, 5]);
   assert.equal(rampLimit(first, "2026-11-20", 5).limit, 5);
   assert.equal(rampLimit(first, "2026-11-20", 30).limit, 8);
-  assert.equal(rampLimit(first, "2026-11-24", 30).limit, 30);
+  assert.equal(rampLimit(first, "2026-11-24", 30).limit, 10);
+  assert.equal(rampLimit(first, "2026-11-24", 30, { strict: true, anchor: "2026-11-24" }).limit, 10);
+  assert.equal(rampLimit(first, "2026-11-26", 30, { strict: true, anchor: "2026-11-24" }).limit, 15);
 });
 
 test("état du jour : plafond par service et total, sans aucune variable d'environnement", () => {

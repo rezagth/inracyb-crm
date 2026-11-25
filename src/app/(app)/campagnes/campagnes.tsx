@@ -20,7 +20,8 @@ type Stats = { contacted: number; mails: number; replies: number; bounces: numbe
 type Health = { missing: boolean; lastRun: { at: string; source: string; ok: boolean; message: string } | null; events: Record<string, number> };
 type C = { id: string; name: string; offer: string; service: ServiceKey; segment: string; status: string; stats: Stats; items: Item[] };
 type Status = { paused: boolean; reason: string; sent: number; bounces: number; complaints: number };
-type Diag = { limit: number; sent: number; stage: number; stages: number[]; target: number; every: number; firstSendOn: string | null };
+type Sender = { domain: string; spf: string; dkim: string; dmarc: string; strict: boolean; issues: string[] };
+type Diag = { limit: number; sent: number; stage: number; stages: number[]; target: number; every: number; firstSendOn: string | null; senderCapped: boolean; sender: Sender };
 
 const STATUS: Record<string, string> = { active: "En cours", pause: "En pause", terminee: "Terminée" };
 
@@ -112,11 +113,25 @@ export function Campagnes({ prospects, offers, ready, urlOk, dailyLimit, sentTod
         <Card title="Service Diagnostic" actions={<span className="text-xs text-subtle-fg">{diagnostic.sent}/{diagnostic.limit} mails aujourd&apos;hui</span>}>
           <div className="flex flex-col gap-2 p-5 text-[13px]">
             <p className="text-muted-fg">
-              Montée en charge : {diagnostic.stages.map((n, i) => (i === diagnostic.stage ? `[${n}]` : String(n))).join(" → ")} mails par jour, un palier tous les {diagnostic.every} jours ouvrés à partir du premier envoi réel{diagnostic.target > (diagnostic.stages.at(-1) ?? 0) ? `, puis ${diagnostic.target}` : ""}.
+              Montée en charge : {diagnostic.stages.map((n, i) => (i === diagnostic.stage ? `[${n}]` : String(n))).join(" → ")} mails par jour, un palier tous les {diagnostic.every} jours ouvrés à partir du premier envoi réel ; au-delà de 10, à partir du jour où le domaine d&apos;envoi est strict.
             </p>
             <p className="text-muted-fg">
               Palier du jour : {diagnostic.stage + 1} sur {diagnostic.stages.length} ({diagnostic.limit} mails). {diagnostic.firstSendOn ? `Premier envoi le ${fd(diagnostic.firstSendOn)}.` : "Aucun envoi pour l'instant : la montée démarre au premier mail."}
             </p>
+            <div className={`rounded-md border px-3 py-2 ${diagnostic.sender.strict ? "border-border-subtle" : "border-warn/40 bg-warn/5"}`}>
+              <p>
+                <strong>Domaine d&apos;envoi {diagnostic.sender.domain || "inconnu"}</strong> : SPF {diagnostic.sender.spf} · DKIM {diagnostic.sender.dkim} · DMARC {diagnostic.sender.dmarc}
+                {diagnostic.sender.strict ? " · prêt pour la montée en charge" : ""}
+              </p>
+              {diagnostic.senderCapped && <p className="mt-1">Plafond retenu à 10 mails par jour (cible {diagnostic.target}) tant que DMARC n&apos;est pas appliqué à 100 % avec une signature DKIM valide.</p>}
+              {diagnostic.sender.issues.length > 0 && (
+                <ul className="mt-1 list-disc pl-5 text-muted-fg">
+                  {diagnostic.sender.issues.map((x) => (
+                    <li key={x}>{x}</li>
+                  ))}
+                </ul>
+              )}
+            </div>
           </div>
         </Card>
       )}

@@ -36,10 +36,10 @@ Deux familles : **A** = authentification du courrier (SPF, DMARC) ; **B** = cert
 
 ## Tableau 2 — `{impact}`
 
-| Famille | Segment 1 (éditeurs, ESN, agences) | Segment 2 (cabinets) |
-|---|---|---|
-| A | Ces éléments reviennent souvent dans les questionnaires de sécurité que les grands clients envoient avant de signer. | Pour un cabinet qui échange chaque jour avec ses clients sur des documents sensibles, c'est un point que les fraudes au faux RIB exploitent régulièrement. |
-| B | Un client ou un prospect qui voit cet avertissement peut s'inquiéter avant même de vous avoir contacté. | Vos clients qui visitent votre site voient cet avertissement, ce qui peut les inquiéter. |
+| Famille | Segment 1 (éditeurs, ESN, agences) | Segment 2 (cabinets) | Segment 3 (immobilier) |
+|---|---|---|---|
+| A | Ces éléments reviennent souvent dans les questionnaires de sécurité que les grands clients envoient avant de signer. | Pour un cabinet qui échange chaque jour avec ses clients sur des documents sensibles, c'est un point que les fraudes au faux RIB exploitent régulièrement. | Pour une agence qui échange chaque jour des RIB, des quittances et des appels de fonds avec ses clients, c'est exactement la faille qu'exploitent les fraudes au faux RIB. |
+| B | Un client ou un prospect qui voit cet avertissement peut s'inquiéter avant même de vous avoir contacté. | Vos clients qui visitent votre site voient cet avertissement, ce qui peut les inquiéter. | Vos clients et les candidats locataires qui visitent votre site voient cet avertissement, ce qui peut les inquiéter. |
 
 ## Tableau 3 — `{piste_corrective}` (J+3)
 
@@ -172,6 +172,62 @@ Objet : Vos clients et les messages à votre nom
 Bonjour {prenom},
 
 Vos clients vous transmettent des documents et parfois des coordonnées bancaires par mail. S'ils reçoivent un faux message à votre nom, c'est vers vous qu'ils se retourneront. Un dossier de preuves (ce qui est en place, ce qui a été corrigé, ce qui reste à faire) permet de montrer que le sujet est maîtrisé, à vos clients comme à votre assureur.
+
+{offre_pack}
+
+Je peux vous dire en quinze minutes ce que je regarderais en priorité chez {entreprise}. Cela vous serait utile ? {prise_rdv}
+
+{signature}
+
+### J+14
+
+Objet : Dernier message de ma part
+
+Bonjour {prenom},
+
+Je ne vous écris plus après celui-ci. Si le sujet devient utile pour {entreprise}, la synthèse d'une page sur {domaine} reste disponible : il suffit de me répondre.
+
+Bonne continuation,
+
+{signature}
+
+---
+
+## Segment 3 — Agences immobilières, syndics, administrateurs de biens (phase J, 25/11/2026)
+
+### J0
+
+Objet : {objet_j0}
+
+Bonjour {prenom},
+
+Je suis [mon prénom], consultant en cybersécurité chez InfraCyb. En regardant les réglages publics de {domaine}, j'ai relevé un point : {constat_principal}.
+
+{impact}
+
+Préférez-vous que je vous envoie la synthèse d'une page, ou que je vous appelle deux minutes pour vous l'expliquer ?
+
+{signature}
+
+### J+3
+
+Objet : Précision sur {domaine}
+
+Bonjour {prenom},
+
+Une précision utile sur le point relevé pour {domaine} : {piste_corrective}. {constat_secondaire}
+
+{synthese}
+
+{signature}
+
+### J+7
+
+Objet : Les virements de vos clients et les messages à votre nom
+
+Bonjour {prenom},
+
+Vos clients vous adressent loyers, dépôts de garantie et appels de fonds sur la foi de vos mails. S'ils reçoivent un faux RIB à votre nom, c'est vers vous qu'ils se retourneront. Un dossier de preuves (ce qui est en place, ce qui a été corrigé, ce qui reste à faire) permet de montrer que le sujet est maîtrisé, à vos clients comme à votre assureur.
 
 {offre_pack}
 

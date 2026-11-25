@@ -5,6 +5,7 @@ import { stageOf, stageRank } from "@/lib/constants";
 import { EMAIL_RE } from "@/lib/brevo";
 import { greetsWithoutName } from "@/lib/contact-extract";
 import {
+  baseRampDone,
   crossHistory,
   dailyState,
   DEFAULT_DAILY_LIMIT,
@@ -31,6 +32,8 @@ import {
   type ServiceKey,
 } from "@/lib/campaign";
 import { siteFromNotes } from "@/lib/contact-extract";
+import { SENDER_UNVERIFIED_CAP } from "@/lib/sender-check";
+import { checkSender } from "./sender-check";
 import { diagnose, parseChecks, targetsOf, type Check, type Probe } from "@/lib/diagnostic";
 import { buildCallTask } from "@/lib/call-task";
 import { buildDiagnosticMail, HOOK_TEXT, hookVariantOf, isHookVariant, isSegment, type Segment } from "@/lib/diagnostic-mails";
@@ -108,14 +111,44 @@ export function restDays(): number {
 export async function getDailyState(t = today()): Promise<DailyState> {
   const rows = await db.select({ offer: schema.mailSends.offer, n: sql<number>`count(*)` }).from(schema.mailSends).where(eq(schema.mailSends.sentOn, t)).groupBy(schema.mailSends.offer);
   const first = (await db.select({ d: sql<string | null>`min(${schema.mailSends.sentOn})` }).from(schema.mailSends).where(eq(schema.mailSends.offer, "diagnostic")))[0]?.d ?? null;
+  const target = parseLimit(process.env.MAIL_DAILY_LIMIT_DIAGNOSTIC, DEFAULT_DAILY_LIMIT.diagnostic);
+  // Au-delà de 10 par jour : seulement avec un domaine d'envoi strict, et en paliers comptés depuis le jour où il l'est devenu.
+  let strict = false;
+  let anchor: string | null = null;
+  if (target > SENDER_UNVERIFIED_CAP) {
+    strict = (await checkSender()).strict;
+    anchor = await rampAnchor(strict && baseRampDone(first, t), t);
+  }
   return dailyState({
     today: t,
     sentByOffer: Object.fromEntries(rows.map((r) => [r.offer, Number(r.n)])),
     firstDiagnosticSendOn: first,
     auditLimit: brevoConfig().dailyLimit,
-    diagnosticTarget: parseLimit(process.env.MAIL_DAILY_LIMIT_DIAGNOSTIC, DEFAULT_DAILY_LIMIT.diagnostic),
+    diagnosticTarget: target,
     prescriberLimit: parseLimit(process.env.MAIL_DAILY_LIMIT_PRESCRIPTEUR, DEFAULT_DAILY_LIMIT.prescripteur),
+    senderStrict: strict,
+    rampAnchor: anchor,
   });
+}
+
+/**
+ * Jour de départ de la montée au-delà de 10 : posé le premier jour où elle est permise, effacé dès qu'elle ne l'est plus
+ * (domaine redevenu non strict) pour que la montée reparte du début. Une base indisponible ne bloque pas l'envoi : plafond prudent.
+ */
+async function rampAnchor(allowed: boolean, t: string): Promise<string | null> {
+  try {
+    const row = (await db.select({ rampFrom: schema.mailServiceState.rampFrom }).from(schema.mailServiceState).where(eq(schema.mailServiceState.service, "diagnostic")).limit(1))[0];
+    const cur = row?.rampFrom || "";
+    if (allowed && !cur) {
+      await db.insert(schema.mailServiceState).values({ service: "diagnostic", rampFrom: t }).onConflictDoUpdate({ target: schema.mailServiceState.service, set: { rampFrom: t } });
+      return t;
+    }
+    if (!allowed && cur) await db.update(schema.mailServiceState).set({ rampFrom: "" }).where(eq(schema.mailServiceState.service, "diagnostic"));
+    return allowed ? cur : null;
+  } catch (e) {
+    console.error("campagne : ancre de montée en charge illisible", e instanceof Error ? e.message : "");
+    return null;
+  }
 }
 
 /** Historique de chaque entreprise vu depuis le service visé (derniers envois de l'autre service, réponses). Les entreprises sans aucun envoi n'y figurent pas. */

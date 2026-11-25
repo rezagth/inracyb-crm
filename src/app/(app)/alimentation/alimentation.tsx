@@ -8,7 +8,7 @@ import { Card } from "@/components/ui";
 import { useToast } from "@/components/mod/toast";
 import { fd } from "@/lib/format";
 
-type Settings = { enabled: boolean; feedDiagnostic: boolean; feedAudit: boolean; departements: string; effectifs: string[]; importPerSegment: number; placesDaily: number };
+type Settings = { enabled: boolean; feedDiagnostic: boolean; feedAudit: boolean; feedPrescripteur: boolean; departements: string; effectifs: string[]; importPerSegment: number; placesDaily: number };
 type Item = { id: string; companyId: string; company: string; segment: string; stage: string; stageKey: string; reason: string; service: string; movedOn: string };
 type Run = { id: string; at: string; source: string; ok: boolean; message: string };
 type Result = { ok: true; message: string } | { ok: false; error: string };
@@ -68,6 +68,7 @@ export function Alimentation({ settings, sizes, placesReady, placesUsedToday, to
           <div className="flex flex-wrap gap-5">
             <label className="flex items-center gap-2"><input type="checkbox" checked={form.feedDiagnostic} onChange={(e) => setForm({ ...form, feedDiagnostic: e.target.checked })} /> Alimenter le service Diagnostic (constat certain obligatoire)</label>
             <label className="flex items-center gap-2"><input type="checkbox" checked={form.feedAudit} onChange={(e) => setForm({ ...form, feedAudit: e.target.checked })} /> Alimenter le service Audit (partage le plafond de la campagne d&apos;audit en cours)</label>
+            <label className="flex items-center gap-2"><input type="checkbox" checked={form.feedPrescripteur} onChange={(e) => setForm({ ...form, feedPrescripteur: e.target.checked })} /> Alimenter la campagne Prescripteurs (experts-comptables, avocats, notaires trouvés par la recherche ; textes validés, plafond Prescripteurs)</label>
           </div>
           <div className="flex flex-wrap items-end gap-4">
             <label className="flex flex-col gap-1">Départements (vide = France entière)

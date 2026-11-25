@@ -378,6 +378,8 @@ export const feedSettings = pgTable("feed_settings", {
   /** services alimentés : le diagnostic par défaut ; l'audit seulement si tu l'actives */
   feedDiagnostic: boolean("feed_diagnostic").notNull().default(true),
   feedAudit: boolean("feed_audit").notNull().default(false),
+  /** cabinets réservés (experts-comptables, avocats, notaires…) trouvés par la recherche : inscrits dans la campagne Prescripteurs */
+  feedPrescripteur: boolean("feed_prescripteur").notNull().default(false),
   /** départements ciblés, séparés par des virgules ("" = France entière) */
   departements: text("departements").notNull().default(""),
   /** tranches d'effectif ciblées (codes Insee, séparés par des virgules) */
@@ -452,6 +454,8 @@ export const mailServiceState = pgTable("mail_service_state", {
   paused: boolean("paused").notNull().default(false),
   reason: text("reason").notNull().default(""),
   changedAt: timestamp("changed_at", { mode: "date", withTimezone: true }).notNull().defaultNow(),
+  /** Diagnostic : jour (AAAA-MM-JJ) où la montée au-delà de 10 par jour a commencé (domaine d'envoi strict) ; "" sinon. */
+  rampFrom: text("ramp_from").notNull().default(""),
 });
 
 /** Journal des déclenchements de campagne (quotidien automatique ou manuel) : permet de voir un échec sans ouvrir les logs Vercel. */

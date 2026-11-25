@@ -14,7 +14,7 @@ const frDate = (iso: string) => iso.split("-").reverse().join("/");
 /** Seuil de rebonds à partir duquel l'envoi doit être regardé (le moteur se met en pause à plus de 2 %). */
 export const BOUNCE_ALERT = 0.02;
 
-export function composeWeeklyReport(records: ProspectRecord[], today: string, pilotsSigned = 0): WeeklyReport {
+export function composeWeeklyReport(records: ProspectRecord[], today: string, pilotsSigned = 0, sender?: { domain: string; strict: boolean; issues: string[] }): WeeklyReport {
   const from = addDaysIso(today, -7);
   const week = records.filter((r) => r.firstSend && r.firstSend > from);
   const all = buildReport(records, today, null);
@@ -25,6 +25,7 @@ export function composeWeeklyReport(records: ProspectRecord[], today: string, pi
   if (total.complained > 0) alerts.push(`${total.complained} plainte(s) pour spam : les envois se mettent en pause d'eux-mêmes. Regarde la campagne concernée avant de relancer.`);
   if (total.contacted >= 20 && total.bounced / total.contacted > BOUNCE_ALERT) alerts.push(`Rebonds à ${rate(total.bounced, total.contacted)} (seuil ${BOUNCE_ALERT * 100} %) : vérifie la qualité des adresses.`);
 
+  if (sender && !sender.strict) alerts.push(`Domaine d'envoi ${sender.domain || "inconnu"} pas prêt pour la montée en charge (plafond du diagnostic retenu à 10 par jour) : ${sender.issues.join(" ") || "vérification impossible."}`);
   const actions: string[] = [];
   const weekNew = sum(weekRows, "contacted");
   if (total.contacted === 0) actions.push("Aucune entreprise n'a encore été contactée : vérifie Brevo (clé, expéditeur validé) et l'alimentation.");

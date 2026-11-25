@@ -6,7 +6,7 @@ import { greetsWithoutName, hostOf, pickPublishedEmail, siteFromNotes } from "@/
 import { DIAGNOSTIC_FRESH_DAYS, RULES_VERSION, usableDiagnostic, type Probe } from "@/lib/diagnostic";
 import { SEGMENTS, isSegment, segmentOfSector, type Segment } from "@/lib/diagnostic-mails";
 import { siteCandidates } from "@/lib/site-guess";
-import { enrolSlots, FEED_DEFAULTS, isPhone, MAILS_PER_PROSPECT, missingCoordinates, nextCursor, parseDepartements, permanentName, readCursors, REJECT, searchPlan, type Cursor } from "@/lib/feed";
+import { enrolSlots, FEED_DEFAULTS, isPhone, MAILS_PER_PROSPECT, PRESCRIBER_MAILS, missingCoordinates, nextCursor, parseDepartements, permanentName, readCursors, REJECT, searchPlan, type Cursor } from "@/lib/feed";
 import { addDays, today } from "@/lib/format";
 import { EFFECTIF_CODES, type SearchInput } from "@/lib/prospect-search";
 import { checkServicePauses, crossHistories, getDailyState, optoutSet, reservedSectors, restDays } from "./campaigns";
@@ -47,14 +47,14 @@ type Verified = { kind: "ok"; email: string; phone: string; site: string } | { k
  * s'arrête quand le temps imparti est presque écoulé ; le reste est repris au passage suivant. Rien ne se passe tant que
  * l'interrupteur global est sur « arrêt ».
  */
-export async function runFeed(opts: { source?: "cron" | "manuel"; budgetMs?: number; deps?: Partial<FeedDeps> } = {}): Promise<FeedSummary> {
+export async function runFeed(opts: { source?: "cron" | "manuel"; budgetMs?: number; deps?: Partial<FeedDeps>; /** seulement diagnostiquer et inscrire le stock déjà vérifié (tâche de 6 h 30), sans chercher */ stockOnly?: boolean } = {}): Promise<FeedSummary> {
   const started = Date.now();
   const budget = opts.budgetMs ?? 50_000;
   const left = () => budget - (Date.now() - started);
   const s = await getFeedSettings();
   const sum: FeedSummary = { ok: true, ran: false, found: 0, imported: 0, completed: 0, diagnosed: 0, enrolled: 0, rejected: 0, message: "" };
   if (!s.enabled) return { ...sum, message: "Alimentation arrêtée (interrupteur général)." };
-  if (!s.feedDiagnostic && !s.feedAudit) return { ...sum, message: "Aucun service n'est alimenté : active le diagnostic ou l'audit." };
+  if (!s.feedDiagnostic && !s.feedAudit && !s.feedPrescripteur) return { ...sum, message: "Aucun service n'est alimenté : active le diagnostic, l'audit ou les prescripteurs." };
 
   const deps: FeedDeps = { search: searchAnnuaire, place: placesReady() ? findPlace : null, crawl: crawlSite, ...opts.deps };
   const t = today();
@@ -75,11 +75,16 @@ export async function runFeed(opts: { source?: "cron" | "manuel"; budgetMs?: num
 
   try {
     sum.ran = true;
+    // Le stock déjà vérifié passe en premier : la recherche de nouvelles entreprises ne doit jamais affamer le diagnostic.
     await enrol();
-    if (left() > 15_000) await recheckLegacy();
-    if (left() > 15_000) await searchAndVerify();
     if (s.feedDiagnostic && left() > 14_000) await diagnoseReady();
     if (left() > 3_000) await enrol();
+    if (!opts.stockOnly) {
+      if (left() > 15_000) await recheckLegacy();
+      if (left() > 15_000) await searchAndVerify();
+      if (s.feedDiagnostic && left() > 14_000) await diagnoseReady();
+      if (left() > 3_000) await enrol();
+    }
   } catch (e) {
     console.error("alimentation : passage interrompu", e instanceof Error ? e.message : "");
     sum.ok = false;
@@ -95,7 +100,7 @@ export async function runFeed(opts: { source?: "cron" | "manuel"; budgetMs?: num
   else if (deps.place && placesUsed >= placesMax) notes.push(`Quota Google Places du jour atteint (${placesMax})`);
   if (bySiren) notes.push(`${bySiren} site(s) trouvé(s) sans Google, prouvé(s) par le SIREN`);
   if (!deps.place) notes.push("Google Places non configuré : seuls les sites prouvés par le SIREN sont retenus");
-  sum.message = [`${sum.found} trouvée(s)`, `${sum.imported} intégrée(s) avec mail et téléphone`, `${sum.diagnosed} diagnostiquée(s)`, `${sum.enrolled} inscrite(s)`, `${sum.rejected} écartée(s)`, ...notes].join(" · ");
+  sum.message = [...(opts.stockOnly ? ["Stock"] : []), `${sum.found} trouvée(s)`, `${sum.imported} intégrée(s) avec mail et téléphone`, `${sum.diagnosed} diagnostiquée(s)`, `${sum.enrolled} inscrite(s)`, `${sum.rejected} écartée(s)`, ...notes].join(" · ");
   try {
     await db.insert(schema.feedRuns).values({ source: opts.source ?? "cron", ok: sum.ok, found: sum.found, imported: sum.imported, completed: sum.completed, diagnosed: sum.diagnosed, enrolled: sum.enrolled, rejected: sum.rejected, message: sum.message.slice(0, 800) });
   } catch (e) {
@@ -174,7 +179,8 @@ export async function runFeed(opts: { source?: "cron" | "manuel"; budgetMs?: num
     let dup = 0, blocked = 0;
 
     for (const [k, segment] of SEGMENTS.entries()) {
-      const plan = searchPlan(segment, departements);
+      // Cabinets réservés aux prescripteurs : cherchés seulement quand l'alimentation des prescripteurs est en marche.
+      const plan = searchPlan(segment, departements, s.feedPrescripteur ? [] : reservedSectors());
       if (!plan.length) continue;
       const mine = await db.select({ stage: schema.feedItems.stage, importedOn: schema.feedItems.importedOn }).from(schema.feedItems).where(eq(schema.feedItems.segment, segment));
       const stock = mine.filter((i) => ACTIVE_STAGES.includes(i.stage)).length;
@@ -311,7 +317,7 @@ export async function runFeed(opts: { source?: "cron" | "manuel"; budgetMs?: num
     };
     const before = await lastOf();
     await queueDiagnostics(ids.filter((id) => !(before.get(id)?.status === "fait" && before.get(id)?.checkedOn === t)));
-    await runDiagnostics({ budgetMs: Math.max(1, Math.min(left() - 4_000, 25_000)), probe: deps.probe });
+    await runDiagnostics({ budgetMs: Math.max(1, Math.min(left() - 4_000, 25_000)), probe: deps.probe, batch: 6 });
     const after = await lastOf();
     for (const it of items) {
       const d = after.get(it.companyId);
@@ -338,7 +344,7 @@ export async function runFeed(opts: { source?: "cron" | "manuel"; budgetMs?: num
   async function enrol() {
     const ready = await db.select().from(schema.feedItems).where(eq(schema.feedItems.stage, "a_inscrire")).orderBy(asc(schema.feedItems.createdAt)).limit(200);
     if (!ready.length) return;
-    const services: ServiceKey[] = [...(s.feedDiagnostic ? (["diagnostic"] as const) : []), ...(s.feedAudit ? (["audit"] as const) : [])];
+    const services: ServiceKey[] = [...(s.feedDiagnostic ? (["diagnostic"] as const) : []), ...(s.feedAudit ? (["audit"] as const) : []), ...(s.feedPrescripteur ? (["prescripteur"] as const) : [])];
     const status = await checkServicePauses();
     const daily = await getDailyState(t);
     const active = await db
@@ -350,11 +356,12 @@ export async function runFeed(opts: { source?: "cron" | "manuel"; budgetMs?: num
     const slots = {} as Record<ServiceKey, number>;
     for (const k of services) {
       const mine = active.filter((a) => serviceOf(a.offer) === k);
-      slots[k] = enrolSlots(daily[k].limit, mine.reduce((n, a) => n + Math.max(0, MAILS_PER_PROSPECT - a.nextStep), 0), mine.filter((a) => a.nextStep === 0).length);
+      const perProspect = k === "prescripteur" ? PRESCRIBER_MAILS : MAILS_PER_PROSPECT;
+      slots[k] = enrolSlots(daily[k].limit, mine.reduce((n, a) => n + Math.max(0, perProspect - a.nextStep), 0), mine.filter((a) => a.nextStep === 0).length, perProspect);
     }
     const optouts = await optoutSet();
     const rest = restDays();
-    const history: Partial<Record<ServiceKey, Map<string, CrossHistory>>> = { audit: await crossHistories("audit"), diagnostic: await crossHistories("diagnostic") };
+    const history: Partial<Record<ServiceKey, Map<string, CrossHistory>>> = { audit: await crossHistories("audit"), diagnostic: await crossHistories("diagnostic"), ...(s.feedPrescripteur ? { prescripteur: await crossHistories("prescripteur") } : {}) };
     const reserved = reservedSectors();
     const diagRows = await db.select().from(schema.companyDiagnostics).where(inArray(schema.companyDiagnostics.companyId, ready.map((r) => r.companyId))).orderBy(desc(schema.companyDiagnostics.createdAt));
     const campaigns = new Map<string, { id: string; status: string }>();
@@ -417,7 +424,7 @@ export async function runFeed(opts: { source?: "cron" | "manuel"; budgetMs?: num
       const key = service + "|" + segment;
       const known = campaigns.get(key);
       if (known) return known;
-      const offer = service === "diagnostic" ? "diagnostic" : "audit";
+      const offer = service === "diagnostic" ? "diagnostic" : service === "prescripteur" ? "prescripteur" : "audit";
       const found = (await db.select({ id: schema.mailCampaigns.id, status: schema.mailCampaigns.status }).from(schema.mailCampaigns).where(and(eq(schema.mailCampaigns.auto, true), eq(schema.mailCampaigns.offer, offer), eq(schema.mailCampaigns.segment, segment), ne(schema.mailCampaigns.status, "terminee"))).orderBy(desc(schema.mailCampaigns.createdAt)).limit(1))[0];
       const camp = found ?? { id: (await db.insert(schema.mailCampaigns).values({ name: permanentName(service, segment), offer, segment, auto: true }).returning({ id: schema.mailCampaigns.id }))[0].id, status: "active" };
       campaigns.set(key, camp);

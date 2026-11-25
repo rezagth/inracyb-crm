@@ -1,4 +1,5 @@
 import { and, eq, gte, ne, sql } from "drizzle-orm";
+import { checkSender } from "@/server/sender-check";
 import { db, schema } from "@/db";
 import { prospectList } from "@/server/queries";
 import { getSettings } from "@/server/core";
@@ -105,6 +106,7 @@ export default async function CampagnesPage() {
     view("j14", "À J+14", "Entreprises dont le premier mail date d'au moins 14 jours (séquence terminée) ; rendez-vous et devis des 14 premiers jours.", 14),
     view("j30", "À J+30", "Entreprises dont le premier mail date d'au moins 30 jours ; rendez-vous et devis des 30 premiers jours.", 30),
   ];
+  const sender = await checkSender();
   const offers = s.offers.split(",").filter((x): x is "audit" | "ciso" | "ia" => ["audit", "ciso", "ia"].includes(x));
   return (
     <>
@@ -116,7 +118,7 @@ export default async function CampagnesPage() {
         urlOk={!!appUrl()}
         dailyLimit={state.audit.limit}
         sentToday={state.audit.sent}
-        diagnostic={{ limit: state.diagnostic.limit, sent: state.diagnostic.sent, stage: state.diagnostic.ramp.stage, stages: state.diagnostic.ramp.stages, target: state.diagnostic.ramp.target, every: RAMP_EVERY, firstSendOn: state.diagnostic.firstSendOn }}
+        diagnostic={{ limit: state.diagnostic.limit, sent: state.diagnostic.sent, stage: state.diagnostic.ramp.stage, stages: state.diagnostic.ramp.stages, target: state.diagnostic.ramp.target, every: RAMP_EVERY, firstSendOn: state.diagnostic.firstSendOn, senderCapped: state.diagnostic.senderCapped, sender: { domain: sender.domain, spf: sender.spf, dkim: sender.dkim, dmarc: sender.dmarc.policy === "quarantine" || sender.dmarc.policy === "reject" ? `${sender.dmarc.policy}${sender.dmarc.pct < 100 ? ` (${sender.dmarc.pct} %)` : ""}` : sender.dmarc.policy, strict: sender.strict, issues: sender.issues } }}
         total={{ limit: state.total.limit, sent: state.total.sent }}
         restDays={rest}
         bilan={{ views: bilan, minSample: MIN_SAMPLE }}
