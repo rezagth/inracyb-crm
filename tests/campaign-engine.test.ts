@@ -184,7 +184,7 @@ test("diagnostic : segment obligatoire, secteur hors segment et HSTS seul exclus
   // Le texte : commun au segment, constat propre au domaine, prénom, expéditeur, signature.
   const m1 = mailTo("contact@diag1.fr")[0];
   assert.equal(m1.subject, "Un point sur les réglages mail de diag1.fr");
-  assert.ok(m1.textContent.startsWith("Bonjour Anne,\n\nJe suis Jean Test, RSSI externalisé chez InfraCyb. En regardant les réglages publics de diag1.fr, j'ai relevé un point : aucun enregistrement SPF n'est publié pour diag1.fr : les messageries ne peuvent pas vérifier quels serveurs ont le droit d'envoyer en votre nom.\n\nPour un cabinet qui échange chaque jour avec ses clients sur des documents sensibles, c'est un point que les fraudes au faux RIB exploitent régulièrement.\n\nPuis-je vous envoyer le détail, sur une page ?\n\nJean Test\n"));
+  assert.ok(m1.textContent.startsWith("Bonjour Anne,\n\nJe suis Jean Test, consultant en cybersécurité chez InfraCyb. En regardant les réglages publics de diag1.fr, j'ai relevé un point : aucun enregistrement SPF n'est publié pour diag1.fr : les messageries ne peuvent pas vérifier quels serveurs ont le droit d'envoyer en votre nom.\n\nPour un cabinet qui échange chaque jour avec ses clients sur des documents sensibles, c'est un point que les fraudes au faux RIB exploitent régulièrement.\n\nPréférez-vous que je vous envoie la synthèse d'une page, ou que je vous appelle deux minutes pour vous l'expliquer ?\n\nJean Test\n"));
   assert.doesNotMatch(m1.textContent, /HSTS/); // jamais dans le premier mail
   assert.equal(mailTo("contact@diag2.fr")[0].subject, "Un point sur les réglages mail de diag2.fr");
   assert.match(mailTo("contact@diag2.fr")[0].textContent, /la politique DMARC de diag2\.fr est en mode surveillance \(`p=none`\)/);
@@ -227,7 +227,14 @@ test("diagnostic : relances J+3, J+7, J+14 ; constat remesuré avant l'envoi ; a
   // diag1 : J+3 avec la piste corrective du même constat et le constat secondaire HSTS.
   const j3 = mailTo("contact@diag1.fr")[1];
   assert.equal(j3.subject, "Précision sur diag1.fr");
-  assert.ok(j3.textContent.startsWith("Bonjour Anne,\n\nUne précision utile sur le point relevé pour diag1.fr : il s'agit de publier un enregistrement SPF qui liste les services autorisés à envoyer en votre nom (messagerie, outil d'envoi, etc.). J'ai aussi noté que le site n'envoie pas l'en-tête HSTS, un réglage simple à ajouter côté serveur.\n\nJe vous envoie volontiers la page de synthèse si cela peut vous servir.\n\nJean Test\n"));
+  assert.ok(j3.textContent.startsWith("Bonjour Anne,\n\nUne précision utile sur le point relevé pour diag1.fr : il s'agit de publier un enregistrement SPF qui liste les services autorisés à envoyer en votre nom (messagerie, outil d'envoi, etc.). J'ai aussi noté que le site n'envoie pas l'en-tête HSTS, un réglage simple à ajouter côté serveur.\n\nJe vous ai préparé la synthèse d'une page : https://crm.test/r/"));
+  // Le lien de la synthèse est signé, valable 60 jours, et désigne le diagnostic mesuré le jour du mail J+3.
+  const token = /https:\/\/crm\.test\/r\/(\S+)\n\nJean Test\n/.exec(j3.textContent)![1];
+  const { readReportToken } = await import("../src/lib/report-link");
+  const diagId = readReportToken(process.env.AUTH_SECRET!, token, Date.now());
+  const lastDiag = (await db.select().from(schema.companyDiagnostics).where(eq(schema.companyDiagnostics.companyId, diagIds[0]))).sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())[0];
+  assert.equal(diagId, lastDiag.id);
+  assert.equal(readReportToken(process.env.AUTH_SECRET!, token, Date.now() + 61 * 86_400_000), null);
   assert.deepEqual(j3.tags, ["crm", "campagne", "diagnostic", "J+3"]);
   // diag2 : constat corrigé, la séquence s'arrête sans rien envoyer.
   const i2 = await itemOf(diagIds[1]);
@@ -248,6 +255,9 @@ test("diagnostic : relances J+3, J+7, J+14 ; constat remesuré avant l'envoi ; a
   const [, , j7, j14] = mailTo("contact@diag1.fr");
   assert.equal(j7.subject, "Vos clients et les messages à votre nom");
   assert.match(j7.textContent, /ce que je regarderais en priorité chez Cabinet Diag 1\. Cela vous serait utile \?/);
+  // J+7 : le Pack est nommé, au prix pilote tant qu'aucun client pilote n'a signé ; sans lien de réservation renseigné, pas de phrase de rendez-vous.
+  assert.match(j7.textContent, /Pour le point relevé sur diag1\.fr, la correction est un forfait : le Pack Courrier sécurisé, à 290\s€ HT pour les trois premiers clients, au lieu de 390\s€ HT\.\n\n/);
+  assert.doesNotMatch(j7.textContent, /créneau directement/);
   assert.equal(j14.subject, "Dernier message de ma part");
   assert.match(j14.textContent, /Si le sujet devient utile pour Cabinet Diag 1, la synthèse d'une page sur diag1\.fr reste disponible : il suffit de me répondre\.\n\nBonne continuation,\n\nJean Test/);
   const i1 = await itemOf(diagIds[0]);
@@ -521,7 +531,7 @@ test("prescripteurs : séquence J0 puis J+7, texte sans commission pour les cabi
     assert.doesNotMatch(o.subject + o.textContent, /commission|rétrocession|rétribu|rémunér|apporteur/i);
     assert.match(o.textContent, /\n\nSe désinscrire en un clic : https:\/\/crm\.test\//);
   }
-  assert.ok(mailTo("anne.martin@lex.fr")[0].textContent.startsWith("Bonjour Anne,\n\nJe suis RSSI externalisé (InfraCyb)."));
+  assert.ok(mailTo("anne.martin@lex.fr")[0].textContent.startsWith("Bonjour Anne,\n\nJe suis consultant en cybersécurité (InfraCyb)."));
   assert.ok(mailTo("contact@comptaplus.fr")[0].textContent.startsWith("Bonjour,\n\n")); // adresse générique : pas de prénom
   assert.match(mailTo("contact@comptaplus.fr")[0].textContent, /commence par le domaine de Compta Plus/);
   assert.deepEqual([(await itemOf(avocat)).nextStep, (await itemOf(avocat)).nextDue], [1, addDaysIso(T, 7)]);

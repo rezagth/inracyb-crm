@@ -16,3 +16,11 @@ export const euros = (cents: number): string => (cents / 100).toLocaleString("fr
 
 /** Places pilotes restantes d'après le nombre de clients pilotes déjà signés. */
 export const pilotSlotsLeft = (signed: number): number => Math.max(0, PACK_COURRIER.pilotSlots - Math.max(0, signed));
+
+/** Phrase d'offre du rapport envoyé au prospect (constats de messagerie seulement). Prix pilote tant qu'il reste des places. */
+export function packOfferText(slotsLeft: number): string {
+  const head = "Le Pack Courrier sécurisé (SPF, DKIM, DMARC) corrige les points de messagerie relevés ci-dessus, en quelques jours et sans interruption : ";
+  return slotsLeft > 0
+    ? head + `${euros(PACK_COURRIER.pilotCents)} pour les ${PACK_COURRIER.pilotSlots} premiers clients, au lieu de ${euros(PACK_COURRIER.publicCents)}.`
+    : head + `${euros(PACK_COURRIER.publicCents)}.`;
+}

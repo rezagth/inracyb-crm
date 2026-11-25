@@ -23,12 +23,12 @@ export function IntegField({ name, label, value, placeholder, type = "text" }: {
   );
 }
 
-export function CopyButton({ text, label }: { text: string; label: string }) {
+export function CopyButton({ text, label, caption = "Copier le lien", title }: { text: string; label: string; caption?: string; title?: string }) {
   const toast = useToast();
   return (
-    <button type="button" className="btn btn-sec btn-sm" onClick={() => navigator.clipboard.writeText(text).then(() => toast(`${label} copié`), () => toast("Copie bloquée"))}>
+    <button type="button" className="btn btn-sec btn-sm" title={title} onClick={() => navigator.clipboard.writeText(text).then(() => toast(`${label} copié`), () => toast("Copie bloquée"))}>
       <Icon name="copy" />
-      Copier le lien
+      {caption}
     </button>
   );
 }

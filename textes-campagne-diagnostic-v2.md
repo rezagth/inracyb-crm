@@ -60,9 +60,21 @@ Deux familles : **A** = authentification du courrier (SPF, DMARC) ; **B** = cert
 
 Pas d'autre constat secondaire : un domaine proche enregistré ou une information ne partent jamais seuls dans un mail.
 
+## Tableau 5 — synthèse, offre et rendez-vous (phase I, 25/11/2026)
+
+Champs composés : le moteur choisit la variante, jamais une phrase nouvelle. `{offre_pack}` ne concerne que la famille A (le Pack Courrier ne corrige pas un certificat) : vide pour la famille B. Le prix pilote s'affiche tant qu'il reste des places pilotes (devis acceptés).
+
+| Champ | Cas | Phrase |
+|---|---|---|
+| `{synthese}` | lien disponible | Je vous ai préparé la synthèse d'une page : {lien_rapport} |
+| `{synthese}` | sans lien | Je vous envoie volontiers la page de synthèse si cela peut vous servir. |
+| `{offre_pack}` | famille A, places pilotes | Pour le point relevé sur {domaine}, la correction est un forfait : le Pack Courrier sécurisé, à {prix_pilote} pour les trois premiers clients, au lieu de {prix_public}. |
+| `{offre_pack}` | famille A, prix public | Pour le point relevé sur {domaine}, la correction est un forfait : le Pack Courrier sécurisé, à {prix_public}. |
+| `{prise_rdv}` | lien de réservation renseigné | Vous pouvez aussi choisir un créneau directement : {lien_cal} |
+
 ## Règles
 
-- Texte brut, sans pièce jointe, sans lien autre que le lien de désinscription ajouté par le moteur (qui ajoute aussi la mention de désinscription : ne pas la mettre dans les textes).
+- Texte brut, sans pièce jointe. J0 et J+14 sans aucun lien. Seuls liens admis (phase I) : la synthèse d'une page à J+3 (`{lien_rapport}`, lien signé valable 60 jours) et la page de réservation à J+7 (`{lien_cal}`). Le moteur ajoute le lien et la mention de désinscription : ne pas les mettre dans les textes.
 - Pas de « Re: » dans les objets, pas le mot « phishing ».
 - Un mail dont un champ obligatoire est vide ne part pas.
 - Les phrases des tableaux sont validées par moi (le propriétaire). Aucune ne doit être modifiée par le code ou générée automatiquement.
@@ -77,11 +89,11 @@ Objet : {objet_j0}
 
 Bonjour {prenom},
 
-Je suis [mon prénom], RSSI externalisé chez InfraCyb. En regardant les réglages publics de {domaine}, j'ai relevé un point : {constat_principal}.
+Je suis [mon prénom], consultant en cybersécurité chez InfraCyb. En regardant les réglages publics de {domaine}, j'ai relevé un point : {constat_principal}.
 
 {impact}
 
-Puis-je vous envoyer le détail, sur une page ?
+Préférez-vous que je vous envoie la synthèse d'une page, ou que je vous appelle deux minutes pour vous l'expliquer ?
 
 {signature}
 
@@ -93,7 +105,7 @@ Bonjour {prenom},
 
 Une précision utile sur le point relevé pour {domaine} : {piste_corrective}. {constat_secondaire}
 
-Je vous envoie volontiers la page de synthèse si cela peut vous servir.
+{synthese}
 
 {signature}
 
@@ -105,7 +117,9 @@ Bonjour {prenom},
 
 Quand un client ou un prospect demande des garanties sur la sécurité de vos échanges, ce type de point est souvent l'un des premiers regardés. Un dossier de preuves (ce qui est en place, ce qui a été corrigé, ce qui reste à faire) permet de répondre vite, sans tout refaire à chaque demande.
 
-Si un questionnaire de sécurité est en cours chez vous, je peux vous dire en quinze minutes ce que je regarderais en priorité. Cela vous serait utile ?
+{offre_pack}
+
+Si un questionnaire de sécurité est en cours chez vous, je peux vous dire en quinze minutes ce que je regarderais en priorité. Cela vous serait utile ? {prise_rdv}
 
 {signature}
 
@@ -131,11 +145,11 @@ Objet : {objet_j0}
 
 Bonjour {prenom},
 
-Je suis [mon prénom], RSSI externalisé chez InfraCyb. En regardant les réglages publics de {domaine}, j'ai relevé un point : {constat_principal}.
+Je suis [mon prénom], consultant en cybersécurité chez InfraCyb. En regardant les réglages publics de {domaine}, j'ai relevé un point : {constat_principal}.
 
 {impact}
 
-Puis-je vous envoyer le détail, sur une page ?
+Préférez-vous que je vous envoie la synthèse d'une page, ou que je vous appelle deux minutes pour vous l'expliquer ?
 
 {signature}
 
@@ -147,7 +161,7 @@ Bonjour {prenom},
 
 Une précision utile sur le point relevé pour {domaine} : {piste_corrective}. {constat_secondaire}
 
-Je vous envoie volontiers la page de synthèse si cela peut vous servir.
+{synthese}
 
 {signature}
 
@@ -159,7 +173,9 @@ Bonjour {prenom},
 
 Vos clients vous transmettent des documents et parfois des coordonnées bancaires par mail. S'ils reçoivent un faux message à votre nom, c'est vers vous qu'ils se retourneront. Un dossier de preuves (ce qui est en place, ce qui a été corrigé, ce qui reste à faire) permet de montrer que le sujet est maîtrisé, à vos clients comme à votre assureur.
 
-Je peux vous dire en quinze minutes ce que je regarderais en priorité chez {entreprise}. Cela vous serait utile ?
+{offre_pack}
+
+Je peux vous dire en quinze minutes ce que je regarderais en priorité chez {entreprise}. Cela vous serait utile ? {prise_rdv}
 
 {signature}
 

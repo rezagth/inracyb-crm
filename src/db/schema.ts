@@ -147,6 +147,8 @@ export const tasks = pgTable(
     companyId: text("company_id").references(() => companies.id, { onDelete: "set null" }),
     dueDate: text("due_date").notNull(),
     priority: text("priority").notNull().default("moyenne"),
+    /** « appel » : tâche de la file d'appels du jour (page Appels) ; vide pour une tâche ordinaire. */
+    kind: text("kind").notNull().default(""),
     done: boolean("done").notNull().default(false),
     doneAt: timestamp("done_at", { mode: "date", withTimezone: true }),
     createdAt: createdAt(),

@@ -219,3 +219,9 @@ export async function lastDocumentSend(companyId: string, textPrefix: string) {
       .limit(1)
   )[0] ?? null;
 }
+
+/** Clients pilotes signés : entreprises ayant au moins un devis accepté (les premiers clients sont les pilotes). */
+export async function pilotsSigned(): Promise<number> {
+  const rows = await db.select({ companyId: schema.quotes.companyId }).from(schema.quotes).where(eq(schema.quotes.status, "accepte"));
+  return new Set(rows.map((r) => r.companyId)).size;
+}

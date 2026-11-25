@@ -38,18 +38,27 @@ export const SECONDARY_TEXT: Record<string, string> = {
   "hsts-absent": "J'ai aussi noté que le site n'envoie pas l'en-tête HSTS, un réglage simple à ajouter côté serveur.",
 };
 
+/** Tableau 5 : synthèse (J+3), offre (J+7, famille A seulement) et rendez-vous (J+7). Variantes fixes, choisies par le moteur. */
+export const EXTRA_TEXT = {
+  syntheseLien: "Je vous ai préparé la synthèse d'une page : {lien_rapport}",
+  syntheseSansLien: "Je vous envoie volontiers la page de synthèse si cela peut vous servir.",
+  offrePilote: "Pour le point relevé sur {domaine}, la correction est un forfait : le Pack Courrier sécurisé, à {prix_pilote} pour les trois premiers clients, au lieu de {prix_public}.",
+  offrePublic: "Pour le point relevé sur {domaine}, la correction est un forfait : le Pack Courrier sécurisé, à {prix_public}.",
+  priseRdv: "Vous pouvez aussi choisir un créneau directement : {lien_cal}",
+} as const;
+
 /** Texte commun par segment : J0, J+3, J+7, J+14. */
 export const SEQUENCE: Record<Segment, { subject: string; body: string }[]> = {
   editeurs: [
-    { subject: "{objet_j0}", body: "Bonjour {prenom},\n\nJe suis [mon prénom], RSSI externalisé chez InfraCyb. En regardant les réglages publics de {domaine}, j'ai relevé un point : {constat_principal}.\n\n{impact}\n\nPuis-je vous envoyer le détail, sur une page ?\n\n{signature}" },
-    { subject: "Précision sur {domaine}", body: "Bonjour {prenom},\n\nUne précision utile sur le point relevé pour {domaine} : {piste_corrective}. {constat_secondaire}\n\nJe vous envoie volontiers la page de synthèse si cela peut vous servir.\n\n{signature}" },
-    { subject: "Questionnaires de sécurité chez {entreprise}", body: "Bonjour {prenom},\n\nQuand un client ou un prospect demande des garanties sur la sécurité de vos échanges, ce type de point est souvent l'un des premiers regardés. Un dossier de preuves (ce qui est en place, ce qui a été corrigé, ce qui reste à faire) permet de répondre vite, sans tout refaire à chaque demande.\n\nSi un questionnaire de sécurité est en cours chez vous, je peux vous dire en quinze minutes ce que je regarderais en priorité. Cela vous serait utile ?\n\n{signature}" },
+    { subject: "{objet_j0}", body: "Bonjour {prenom},\n\nJe suis [mon prénom], consultant en cybersécurité chez InfraCyb. En regardant les réglages publics de {domaine}, j'ai relevé un point : {constat_principal}.\n\n{impact}\n\nPréférez-vous que je vous envoie la synthèse d'une page, ou que je vous appelle deux minutes pour vous l'expliquer ?\n\n{signature}" },
+    { subject: "Précision sur {domaine}", body: "Bonjour {prenom},\n\nUne précision utile sur le point relevé pour {domaine} : {piste_corrective}. {constat_secondaire}\n\n{synthese}\n\n{signature}" },
+    { subject: "Questionnaires de sécurité chez {entreprise}", body: "Bonjour {prenom},\n\nQuand un client ou un prospect demande des garanties sur la sécurité de vos échanges, ce type de point est souvent l'un des premiers regardés. Un dossier de preuves (ce qui est en place, ce qui a été corrigé, ce qui reste à faire) permet de répondre vite, sans tout refaire à chaque demande.\n\n{offre_pack}\n\nSi un questionnaire de sécurité est en cours chez vous, je peux vous dire en quinze minutes ce que je regarderais en priorité. Cela vous serait utile ? {prise_rdv}\n\n{signature}" },
     { subject: "Dernier message de ma part", body: "Bonjour {prenom},\n\nJe ne vous écris plus après celui-ci. Si le sujet devient utile chez {entreprise} (questionnaire client, renouvellement d'assurance), la synthèse d'une page sur {domaine} reste disponible : il suffit de me répondre.\n\nBonne continuation,\n\n{signature}" },
   ],
   cabinets: [
-    { subject: "{objet_j0}", body: "Bonjour {prenom},\n\nJe suis [mon prénom], RSSI externalisé chez InfraCyb. En regardant les réglages publics de {domaine}, j'ai relevé un point : {constat_principal}.\n\n{impact}\n\nPuis-je vous envoyer le détail, sur une page ?\n\n{signature}" },
-    { subject: "Précision sur {domaine}", body: "Bonjour {prenom},\n\nUne précision utile sur le point relevé pour {domaine} : {piste_corrective}. {constat_secondaire}\n\nJe vous envoie volontiers la page de synthèse si cela peut vous servir.\n\n{signature}" },
-    { subject: "Vos clients et les messages à votre nom", body: "Bonjour {prenom},\n\nVos clients vous transmettent des documents et parfois des coordonnées bancaires par mail. S'ils reçoivent un faux message à votre nom, c'est vers vous qu'ils se retourneront. Un dossier de preuves (ce qui est en place, ce qui a été corrigé, ce qui reste à faire) permet de montrer que le sujet est maîtrisé, à vos clients comme à votre assureur.\n\nJe peux vous dire en quinze minutes ce que je regarderais en priorité chez {entreprise}. Cela vous serait utile ?\n\n{signature}" },
+    { subject: "{objet_j0}", body: "Bonjour {prenom},\n\nJe suis [mon prénom], consultant en cybersécurité chez InfraCyb. En regardant les réglages publics de {domaine}, j'ai relevé un point : {constat_principal}.\n\n{impact}\n\nPréférez-vous que je vous envoie la synthèse d'une page, ou que je vous appelle deux minutes pour vous l'expliquer ?\n\n{signature}" },
+    { subject: "Précision sur {domaine}", body: "Bonjour {prenom},\n\nUne précision utile sur le point relevé pour {domaine} : {piste_corrective}. {constat_secondaire}\n\n{synthese}\n\n{signature}" },
+    { subject: "Vos clients et les messages à votre nom", body: "Bonjour {prenom},\n\nVos clients vous transmettent des documents et parfois des coordonnées bancaires par mail. S'ils reçoivent un faux message à votre nom, c'est vers vous qu'ils se retourneront. Un dossier de preuves (ce qui est en place, ce qui a été corrigé, ce qui reste à faire) permet de montrer que le sujet est maîtrisé, à vos clients comme à votre assureur.\n\n{offre_pack}\n\nJe peux vous dire en quinze minutes ce que je regarderais en priorité chez {entreprise}. Cela vous serait utile ? {prise_rdv}\n\n{signature}" },
     { subject: "Dernier message de ma part", body: "Bonjour {prenom},\n\nJe ne vous écris plus après celui-ci. Si le sujet devient utile pour {entreprise}, la synthèse d'une page sur {domaine} reste disponible : il suffit de me répondre.\n\nBonne continuation,\n\n{signature}" },
   ],
 };
@@ -75,10 +84,21 @@ export type DiagnosticMailInput = {
   /** nom de l'expéditeur, à la place de « [mon prénom] » */
   me: string;
   signature: string;
+  /** lien signé de la synthèse d'une page (J+3) ; absent : phrase sans lien */
+  reportUrl?: string;
+  /** page de réservation (J+7) ; absente : pas de phrase de rendez-vous */
+  calUrl?: string;
+  /** prix pilote encore ouvert (il reste des places) */
+  pilotOpen?: boolean;
+  /** prix du Pack Courrier, déjà formatés (« 290 € HT ») */
+  prixPilote?: string;
+  prixPublic?: string;
 };
 export type DiagnosticMail = { ok: true; subject: string; body: string } | { ok: false; error: string };
 
 const FIELD = /\{([a-z_0-9]+)\}/g;
+/** Lien admis dans un mail : https, sans espace ni caractère d'échappement. */
+const httpsUrl = (u: string | undefined): string => (u && /^https:\/\/[^\s<>"'{}\[\]]+$/i.test(u.trim()) ? u.trim() : "");
 const ME = "[mon prénom]";
 
 /**
@@ -93,13 +113,28 @@ export function buildDiagnosticMail(i: DiagnosticMailInput): DiagnosticMail {
   const check = i.checks.find((c) => c.variant === i.hook);
   const secondary = i.step === 1 ? i.checks.find((c) => mailable(c) && c.variant in SECONDARY_TEXT) : undefined;
   // Champs composés : des phrases entières des tableaux, qui contiennent elles-mêmes des champs simples.
-  const composed: Record<string, string> = { objet_j0: text.subject, constat_principal: text.finding, impact: IMPACT[text.family][i.segment], piste_corrective: text.fix, constat_secondaire: secondary ? SECONDARY_TEXT[secondary.variant] : "" };
+  const reportUrl = httpsUrl(i.reportUrl);
+  const calUrl = httpsUrl(i.calUrl);
+  const composed: Record<string, string> = {
+    objet_j0: text.subject,
+    constat_principal: text.finding,
+    impact: IMPACT[text.family][i.segment],
+    piste_corrective: text.fix,
+    constat_secondaire: secondary ? SECONDARY_TEXT[secondary.variant] : "",
+    synthese: reportUrl ? EXTRA_TEXT.syntheseLien : EXTRA_TEXT.syntheseSansLien,
+    offre_pack: text.family !== "A" ? "" : i.pilotOpen ? EXTRA_TEXT.offrePilote : EXTRA_TEXT.offrePublic,
+    prise_rdv: calUrl ? EXTRA_TEXT.priseRdv : "",
+  };
   const simple: Record<string, string> = {
     prenom: /^standard$/i.test(i.prenom.trim()) ? "" : clean(i.prenom, 60),
     entreprise: clean(i.entreprise, 120),
     domaine: clean(text.family === "A" ? i.mailDomain : i.webHost, 120),
     date_expiration: check?.data?.validTo ? fd(check.data.validTo) : "",
     signature: i.signature.trim(),
+    lien_rapport: reportUrl,
+    lien_cal: calUrl,
+    prix_pilote: clean(i.prixPilote ?? "", 30),
+    prix_public: clean(i.prixPublic ?? "", 30),
   };
   const missing = new Set<string>();
   // Seule exception au prénom obligatoire : une adresse générique publiée, sans dirigeant connu.
@@ -117,7 +152,8 @@ export function buildDiagnosticMail(i: DiagnosticMailInput): DiagnosticMail {
   };
   const subject = fill(tpl.subject).trim();
   // Le constat secondaire est facultatif : quand il est vide, on retire seulement l'espace laissé en fin de ligne.
-  const body = fill(tpl.body).replace(/[ \t]+$/gm, "").trim();
+  // Une phrase facultative vide (offre pour un certificat) ne laisse pas de paragraphe vide.
+  const body = fill(tpl.body).replace(/[ \t]+$/gm, "").replace(/\n{3,}/g, "\n\n").trim();
   if (!clean(i.me, 80)) missing.add("mon prénom (Paramètres)");
   if (missing.size) return { ok: false, error: `Champ obligatoire vide : ${[...missing].join(", ")}. Le mail n'est pas parti.` };
   const all = subject + "\n" + body;

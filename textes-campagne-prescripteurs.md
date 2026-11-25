@@ -10,7 +10,7 @@ Objet : Un diagnostic gratuit de la messagerie de vos clients
 
 Bonjour {prenom},
 
-Je suis RSSI externalisé (InfraCyb). Je propose à quelques cabinets de faire gratuitement le diagnostic public de la messagerie des entreprises qu'ils accompagnent : SPF, DMARC, certificat. Rien à installer chez le client, et pas de temps demandé au cabinet.
+Je suis consultant en cybersécurité (InfraCyb). Je propose à quelques cabinets de faire gratuitement le diagnostic public de la messagerie des entreprises qu'ils accompagnent : SPF, DMARC, certificat. Rien à installer chez le client, et pas de temps demandé au cabinet.
 
 Pour chaque client concerné, vous recevez une page claire : ce qui est visible depuis l'extérieur et ce qu'il faut corriger. Vous décidez de la transmettre ou non. Je ne contacte aucun de vos clients de mon côté.
 
@@ -40,7 +40,7 @@ Objet : Partenariat : sécurité de la messagerie de vos clients
 
 Bonjour {prenom},
 
-Je suis RSSI externalisé (InfraCyb). Vos clients se posent peut-être des questions sur la sécurité de leur messagerie (usurpation d'adresse, SPF, DKIM, DMARC), un sujet que vous ne traitez pas forcément vous-même.
+Je suis consultant en cybersécurité (InfraCyb). Vos clients se posent peut-être des questions sur la sécurité de leur messagerie (usurpation d'adresse, SPF, DKIM, DMARC), un sujet que vous ne traitez pas forcément vous-même.
 
 Je propose un partenariat simple : je réalise gratuitement le diagnostic public des clients que vous m'indiquez. S'ils choisissent ensuite le Pack Courrier sécurisé ou une mission, vous recevez 15 % du montant HT encaissé sur la première facture, payé 30 jours après l'encaissement. Un accord écrit fixe ces conditions avant toute recommandation.
 

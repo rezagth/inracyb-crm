@@ -50,7 +50,7 @@ export async function endCallAction(companyId: string, offer: string, outcome: s
               await logEvent(tx, companyId, "stage", `Étape : ${stageOf(c.stage).label} → Perdu`);
             } else await bump(tx, companyId, o.data === "rdv" ? "rdv" : "contacte");
             if (o.data === "rappel" || o.data === "messagerie")
-              await tx.insert(schema.tasks).values({ title: `${o.data === "rappel" ? "Rappeler " : "Retenter l'appel — "}${c.name}`, companyId, dueDate: due, priority: "moyenne" });
+              await tx.insert(schema.tasks).values({ title: `${o.data === "rappel" ? "Rappeler " : "Retenter l'appel — "}${c.name}`, companyId, dueDate: due, priority: "moyenne", kind: "appel" });
           });
   revalidatePath("/", "layout");
   const message =
@@ -82,7 +82,7 @@ async function recordMailSent(companyId: string, offer: OfferKey, step: number, 
   await db.transaction(async (tx) => {
     await tx.insert(schema.mailSends).values({ companyId, offer, step, subject, sentOn: today() });
     await logEvent(tx, companyId, "mail", `Mail ${cur.k} envoyé${via} (${O.l}) : « ${subject} »`);
-    if (next && due) await tx.insert(schema.tasks).values({ title: `Envoyer la relance ${next.k} à ${c.name} (${O.l})`, companyId, dueDate: due, priority: "moyenne" });
+    if (next && due) await tx.insert(schema.tasks).values({ title: `Envoyer la relance ${next.k} à ${c.name} (${O.l})`, companyId, dueDate: due, priority: "moyenne", kind: "appel" });
     await bump(tx, companyId, "contacte");
   });
   revalidatePath("/", "layout");

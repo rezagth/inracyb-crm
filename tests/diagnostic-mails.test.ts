@@ -3,7 +3,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { HOOK_VARIANTS, type Check } from "../src/lib/diagnostic";
-import { buildDiagnosticMail, HOOK_TEXT, IMPACT, SECONDARY_TEXT, SEGMENTS, SEGMENT_SECTORS, SEQUENCE, segmentOfSector, type DiagnosticMailInput } from "../src/lib/diagnostic-mails";
+import { buildDiagnosticMail, EXTRA_TEXT, HOOK_TEXT, IMPACT, SECONDARY_TEXT, SEGMENTS, SEGMENT_SECTORS, SEQUENCE, segmentOfSector, type DiagnosticMailInput } from "../src/lib/diagnostic-mails";
 import { greetsWithoutName } from "../src/lib/contact-extract";
 import { sectorFromNaf, SECTOR_SEARCH } from "../src/lib/prospect-search";
 
@@ -51,7 +51,7 @@ test("les phrases du code sont celles du fichier validé, caractère pour caract
 });
 
 const check = (variant: string, data?: Check["data"]): Check => ({ id: variant.split("-")[0], label: "", status: "constat", certain: true, proof: "", wording: "", rank: 1, variant, ...(data ? { data } : {}) });
-const base: DiagnosticMailInput = { segment: "editeurs", step: 0, hook: "dmarc-absent", checks: [check("dmarc-absent")], mailDomain: "exemple.fr", webHost: "www.exemple.fr", prenom: "Claire", entreprise: "Exemple SAS", me: "Jean Test", signature: "Jean Test\nInfraCyb\n01 02 03 04 05 · jean@infracyb.fr" };
+const base: DiagnosticMailInput = { segment: "editeurs", step: 0, hook: "dmarc-absent", checks: [check("dmarc-absent")], mailDomain: "exemple.fr", webHost: "www.exemple.fr", prenom: "Claire", entreprise: "Exemple SAS", me: "Jean Test", signature: "Jean Test\nInfraCyb\n01 02 03 04 05 · jean@infracyb.fr", prixPilote: "290 € HT", prixPublic: "390 € HT" };
 const ok = (i: Partial<DiagnosticMailInput>) => {
   const m = buildDiagnosticMail({ ...base, ...i });
   assert.ok(m.ok, JSON.stringify(m));
@@ -82,7 +82,7 @@ test("chaque segment, chaque constat, chaque étape : mail complet, phrases inta
         if (step === 0) {
           assert.equal(m.subject, fillIn(t.subject));
           assert.ok(m.body.includes("j'ai relevé un point : " + fillIn(t.finding) + ".\n\n" + IMPACT[t.family][segment] + "\n\n"), `${segment} ${hook}`);
-          assert.ok(m.body.includes("Je suis Jean Test, RSSI externalisé chez InfraCyb."));
+          assert.ok(m.body.includes("Je suis Jean Test, consultant en cybersécurité chez InfraCyb."));
         }
         if (step === 1) assert.ok(m.body.includes(`pour ${dom} : ${fillIn(t.fix)}.\n\n`), `${segment} ${hook}`);
       }
@@ -147,4 +147,35 @@ test("segments : secteurs admis et codes NAF", () => {
   assert.deepEqual(["62.01Z", "62.02A", "58.29C", "66.22Z", "69.20Z", "69.10Z", "62.03Z"].map((n) => sectorFromNaf(n)), ["Numérique", "Numérique", "Numérique", "Courtage", "Expertise comptable", "Juridique", "Autres"]);
   assert.deepEqual(SECTOR_SEARCH["Numérique"]?.naf, ["62.01Z", "62.02A", "58.29C"]);
   assert.deepEqual(SECTOR_SEARCH.Courtage?.naf, ["66.22Z"]);
+});
+
+test("tableau 5 : phrases de synthèse, d'offre et de rendez-vous identiques au fichier validé", () => {
+  assert.deepEqual(table("## Tableau 5").map((r) => r[2]), [EXTRA_TEXT.syntheseLien, EXTRA_TEXT.syntheseSansLien, EXTRA_TEXT.offrePilote, EXTRA_TEXT.offrePublic, EXTRA_TEXT.priseRdv]);
+});
+
+test("liens : synthèse à J+3, réservation à J+7, jamais à J0 ni J+14 ; offre Pack pour la messagerie seulement", () => {
+  const links = { reportUrl: "https://crm.test/r/abc.123.sig", calUrl: "https://cal.com/jean/15min", pilotOpen: true };
+  for (const segment of SEGMENTS) {
+    for (const step of [0, 3]) assert.doesNotMatch(ok({ segment, step, ...links, checks: step === 0 ? base.checks : [] }).body, /https?:\/\//, `${segment} ${step}`);
+    const j3 = ok({ segment, step: 1, ...links });
+    assert.ok(j3.body.includes("Je vous ai préparé la synthèse d'une page : https://crm.test/r/abc.123.sig\n\n"));
+    assert.doesNotMatch(j3.body, /cal\.com/);
+    const j7 = ok({ segment, step: 2, ...links, checks: [] });
+    assert.ok(j7.body.includes("Pour le point relevé sur exemple.fr, la correction est un forfait : le Pack Courrier sécurisé, à 290 € HT pour les trois premiers clients, au lieu de 390 € HT.\n\n"));
+    assert.ok(j7.body.includes("Cela vous serait utile ? Vous pouvez aussi choisir un créneau directement : https://cal.com/jean/15min\n\n"));
+    assert.doesNotMatch(j7.body, /crm\.test/);
+    // Places pilotes épuisées : prix public seul.
+    const pub = ok({ segment, step: 2, ...links, pilotOpen: false, checks: [] });
+    assert.ok(pub.body.includes("le Pack Courrier sécurisé, à 390 € HT.\n\n") && !/290/.test(pub.body));
+    // Constat de certificat : pas d'offre Pack, pas de paragraphe vide.
+    const cert = ok({ segment, step: 2, hook: "tls-bientot", checks: [], ...links });
+    assert.doesNotMatch(cert.body, /Pack|\n\n\n/);
+    // Sans lien : les phrases d'origine, sans rien de vide.
+    assert.ok(ok({ segment, step: 1 }).body.includes(EXTRA_TEXT.syntheseSansLien + "\n\n"));
+    assert.match(ok({ segment, step: 2, checks: [] }).body, /Cela vous serait utile \?\n\n/);
+  }
+  // Un lien douteux (http, espace, accolade) n'entre jamais dans un mail.
+  for (const reportUrl of ["http://crm.test/r/x", "https://crm.test/r/x y", "https://crm.test/{prenom}", "javascript:alert(1)"]) assert.ok(ok({ step: 1, reportUrl }).body.includes(EXTRA_TEXT.syntheseSansLien));
+  // Offre de messagerie sans prix : le mail ne part pas.
+  assert.match(ko({ step: 2, checks: [], prixPublic: "" }), /prix_public/);
 });

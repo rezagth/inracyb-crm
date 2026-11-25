@@ -40,7 +40,9 @@ import { composePrescriberMail, prescriberCallTask, prescriberKindOf, prescriber
 import { brevoConfig, sendBrevoMail } from "./brevo";
 import { publicProbe } from "./diagnostic";
 import { logEvent } from "./core";
-import { getProfile } from "./queries";
+import { getProfile, pilotsSigned } from "./queries";
+import { euros, PACK_COURRIER, pilotSlotsLeft } from "@/lib/pricing";
+import { makeReportToken } from "@/lib/report-link";
 
 /** Adresse publique du CRM (pour le lien de désinscription) : APP_URL, sinon le domaine de production Vercel. */
 export function appUrl(): string {
@@ -48,6 +50,14 @@ export function appUrl(): string {
   if (/^https:\/\//i.test(a)) return a;
   const v = (process.env.VERCEL_PROJECT_PRODUCTION_URL || "").trim();
   return v ? "https://" + v.replace(/^https?:\/\//i, "").replace(/\/+$/, "") : "";
+}
+
+/** Lien public signé de la synthèse d'un diagnostic (valable 60 jours) ; null sans adresse publique ou sans clé. */
+export function reportLinkFor(diagnosticId: string, nowMs = Date.now()): string | null {
+  const base = appUrl();
+  const secret = (process.env.AUTH_SECRET || "").trim();
+  if (!base || secret.length < 16) return null;
+  return `${base}/r/${makeReportToken(secret, diagnosticId, nowMs)}`;
 }
 
 export function optoutLink(email: string): string | null {
@@ -195,10 +205,12 @@ async function prepareDiagnosticMail(a: { companyId: string; companyName: string
   let mailDomain = "";
   let webHost = "";
   let hook = a.hook;
+  let diagnosticId = "";
   if (a.step <= 1) {
     const prev = (await db.select().from(schema.companyDiagnostics).where(and(eq(schema.companyDiagnostics.companyId, a.companyId), eq(schema.companyDiagnostics.status, "fait"))).orderBy(desc(schema.companyDiagnostics.createdAt)).limit(1))[0];
     const d = await diagnose(targetsOf(a.email, siteFromNotes(a.notes)), a.probe, a.today);
-    await db.insert(schema.companyDiagnostics).values({ companyId: a.companyId, status: "fait", mailDomain: d.mailDomain, webHost: d.webHost, findings: JSON.stringify(d.checks), mainFinding: d.main, certainCount: d.certainCount, rulesVersion: d.rulesVersion, checkedOn: d.checkedOn });
+    const [saved] = await db.insert(schema.companyDiagnostics).values({ companyId: a.companyId, status: "fait", mailDomain: d.mailDomain, webHost: d.webHost, findings: JSON.stringify(d.checks), mainFinding: d.main, certainCount: d.certainCount, rulesVersion: d.rulesVersion, checkedOn: d.checkedOn }).returning({ id: schema.companyDiagnostics.id });
+    diagnosticId = saved.id;
     checks = d.checks;
     mailDomain = d.mailDomain;
     webHost = d.webHost;
@@ -222,7 +234,10 @@ async function prepareDiagnosticMail(a: { companyId: string; companyName: string
     checks = parseChecks(last?.findings ?? "[]").filter((c) => c.variant === hook);
   }
   if (!isHookVariant(hook)) return { error: "Constat du premier mail introuvable : rien n'a été envoyé." };
-  const m = buildDiagnosticMail({ segment, step: a.step, hook, checks, mailDomain, webHost, prenom: a.firstName, sansPrenom: greetsWithoutName(a.email, a.emailSource), entreprise: a.companyName, me: a.profile.me, signature: a.signature });
+  // J+3 : lien signé vers la synthèse mesurée le jour même. J+7 : offre Pack (prix pilote tant qu'il reste des places) et réservation.
+  const reportUrl = a.step === 1 && diagnosticId ? (reportLinkFor(diagnosticId) ?? undefined) : undefined;
+  const pilotOpen = a.step === 2 ? pilotSlotsLeft(await pilotsSigned()) > 0 : false;
+  const m = buildDiagnosticMail({ segment, step: a.step, hook, checks, mailDomain, webHost, prenom: a.firstName, sansPrenom: greetsWithoutName(a.email, a.emailSource), entreprise: a.companyName, me: a.profile.me, signature: a.signature, reportUrl, calUrl: a.profile.calUrl, pilotOpen, prixPilote: euros(PACK_COURRIER.pilotCents), prixPublic: euros(PACK_COURRIER.publicCents) });
   return m.ok ? { mail: { subject: m.subject, body: m.body }, hook } : { error: m.error };
 }
 
@@ -342,7 +357,7 @@ export async function runCampaigns(opts: { campaignId?: string; budgetMs?: numbe
               sentOn,
             });
             if (call && !(await tx.select({ id: schema.tasks.id }).from(schema.tasks).where(and(eq(schema.tasks.title, call.title), eq(schema.tasks.done, false))).limit(1))[0]) {
-              await tx.insert(schema.tasks).values({ title: call.title, companyId: c.id, dueDate: call.dueDate, priority: call.priority });
+              await tx.insert(schema.tasks).values({ title: call.title, companyId: c.id, dueDate: call.dueDate, priority: call.priority, kind: "appel" });
               await logEvent(tx, c.id, "note", `Appel prévu le ${call.dueDate.split("-").reverse().join("/")} : phrases d'ouverture\n\n${call.opening}`);
             }
           }
@@ -357,7 +372,7 @@ export async function runCampaigns(opts: { campaignId?: string; budgetMs?: numbe
               sentOn,
             });
             if (call && !(await tx.select({ id: schema.tasks.id }).from(schema.tasks).where(and(eq(schema.tasks.title, call.title), eq(schema.tasks.done, false))).limit(1))[0]) {
-              await tx.insert(schema.tasks).values({ title: call.title, companyId: c.id, dueDate: call.dueDate, priority: call.priority });
+              await tx.insert(schema.tasks).values({ title: call.title, companyId: c.id, dueDate: call.dueDate, priority: call.priority, kind: "appel" });
               await logEvent(tx, c.id, "note", `Appel prévu le ${call.dueDate.split("-").reverse().join("/")} : phrases d'ouverture\n\n${call.opening}`);
             }
           }

@@ -18,6 +18,8 @@ import { prescriberKindOf } from "@/lib/prescripteur-mails";
 import { referralDiscountBp } from "@/lib/referrals";
 import { reservedSectors } from "@/server/campaigns";
 import { TaskCheck } from "../../taches/task-check";
+import { CopyButton } from "../../integrations/widgets";
+import { latestReportLink } from "@/server/report-link";
 
 /** La recherche d'e-mails lit des sites web : on laisse jusqu'à 60 s à chaque action. */
 export const maxDuration = 60;
@@ -59,6 +61,9 @@ export default async function CompanyPage({ params, searchParams }: { params: Pr
     .filter((p) => p.companyId !== c.id && (p.status !== "inactif" || p.id === c.referredBy));
   const inSequence = !!(await db.select({ id: schema.mailCampaignItems.id }).from(schema.mailCampaignItems).where(and(eq(schema.mailCampaignItems.companyId, c.id), eq(schema.mailCampaignItems.status, "en_cours"))).limit(1))[0];
 
+  // Synthèse de diagnostic à envoyer au prospect : lien signé, valable 60 jours à partir de maintenant.
+  const reportLink = await latestReportLink(c.id);
+
   return (
     <>
       <PageHeader
@@ -84,6 +89,7 @@ export default async function CompanyPage({ params, searchParams }: { params: Pr
           <>
             <StageSelect id={c.id} stage={c.stage} />
             {inSequence && <ReplyReceivedButton companyId={c.id} />}
+            {reportLink && <CopyButton text={reportLink} label="Lien de la synthèse" caption="Lien du rapport" title="Lien de la synthèse de diagnostic à envoyer au prospect (valable 60 jours)" />}
             <EnrichButton companyId={c.id} />
             <Link href={`/prospection?co=${c.id}&call=1`} className="btn btn-sec">
               <Icon name="phone" />
