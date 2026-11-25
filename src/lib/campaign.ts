@@ -340,6 +340,7 @@ export const emailSourceLabel = (s: string): string => EMAIL_SOURCE_LABEL[s as E
  */
 export function originBlock(source: string, service: ServiceKey): string | null {
   if (source === "saisie" || source === "site") return null;
+  if (source === "formulaire") return "Demande entrante (formulaire du site) : suivi personnel, jamais de séquence de prospection.";
   if (source === "historique") return service === "audit" ? null : "Origine de l'adresse non vérifiée (adresse historique) : ressaisis-la sur la fiche pour le diagnostic.";
   return "Origine de l'adresse inconnue : ressaisis-la sur la fiche.";
 }

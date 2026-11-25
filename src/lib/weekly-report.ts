@@ -14,7 +14,7 @@ const frDate = (iso: string) => iso.split("-").reverse().join("/");
 /** Seuil de rebonds à partir duquel l'envoi doit être regardé (le moteur se met en pause à plus de 2 %). */
 export const BOUNCE_ALERT = 0.02;
 
-export function composeWeeklyReport(records: ProspectRecord[], today: string, pilotsSigned = 0, sender?: { domain: string; strict: boolean; issues: string[] }): WeeklyReport {
+export function composeWeeklyReport(records: ProspectRecord[], today: string, pilotsSigned = 0, sender?: { domain: string; strict: boolean; issues: string[] }, inbound = 0): WeeklyReport {
   const from = addDaysIso(today, -7);
   const week = records.filter((r) => r.firstSend && r.firstSend > from);
   const all = buildReport(records, today, null);
@@ -33,6 +33,7 @@ export function composeWeeklyReport(records: ProspectRecord[], today: string, pi
   if (total.replied > 0 && total.meetings === 0) actions.push(`${total.replied} réponse(s) sans rendez-vous : réponds-leur et propose un créneau de 15 minutes.`);
   const left = pilotSlotsLeft(pilotsSigned);
   if (left > 0 && total.contacted > 0) actions.push(`Il reste ${left} place(s) pilote sur ${PACK_COURRIER.pilotSlots} : propose le prix pilote aux entreprises qui répondent.`);
+  if (inbound > 0) actions.unshift(`${inbound} demande(s) entrante(s) du site cette semaine : rappelle-les en premier (en tête de la page Appels).`);
   if (!actions.length) actions.push("Rien d'urgent : continue les appels de J+4 et les réponses.");
 
   const line = (r: ReportRow) => `- ${r.label} : ${r.contacted} contactée(s), ${r.replied} réponse(s) (${rate(r.replied, r.contacted)}), ${r.meetings} rendez-vous, ${r.signed} devis accepté(s), ${r.optedOut} désinscription(s), ${r.bounced} rebond(s), ${r.complained} plainte(s)`;
@@ -42,6 +43,7 @@ export function composeWeeklyReport(records: ProspectRecord[], today: string, pi
     `Bilan de la semaine du ${frDate(from)} au ${frDate(today)}`,
     "",
     `Cette semaine : ${weekNew} nouvelle(s) entreprise(s) contactée(s)${weekRows.length ? " (" + weekRows.map((r) => `${r.label} : ${r.contacted}`).join(" ; ") + ")" : ""}.`,
+    `Demandes entrantes du site (test de messagerie, autodiagnostic) : ${inbound}.`,
     "",
     "Depuis le début :",
     ...(all.length ? all.map(line) : ["- Aucun envoi pour l'instant."]),

@@ -202,3 +202,11 @@ psql "$PROD_URL" -X -v ON_ERROR_STOP=1 -f drizzle-manuel-phase-j.sql
 - **Sous-domaine d'envoi (recommandé)** : par exemple `contact@go.infracyb.fr` authentifié dans Brevo, puis `MAIL_FROM_EMAIL` = cette adresse et `MAIL_REPLY_TO=contact@infracyb.fr` (les réponses restent dans la boîte lue par le CRM). Sans DMARC propre, le sous-domaine suit `sp=` (sinon `p=`) du domaine principal.
 - **Segments** : le segment Cabinets ne cherche plus les secteurs réservés aux prescripteurs ; nouveau segment Immobilier (agences, syndics, administrateurs de biens ; textes : segment 3 de `textes-campagne-diagnostic-v2.md`).
 - **Prescripteurs automatiques** : case « Alimenter la campagne Prescripteurs » sur la page Alimentation (éteinte par défaut). Les cabinets réservés trouvés entrent dans la campagne permanente Prescripteurs (plafond `MAIL_DAILY_LIMIT_PRESCRIPTEUR`).
+
+## Phase L : prospects entrants depuis www.infracyb.fr
+
+**Aucune migration.** Trois dépôts : CRM (ce dépôt), site public (`~/infracyb`), StratCyber (`~/stratcyber`).
+
+- **CRM** : adresse `/api/webhooks/lead`, fermée tant que `LEAD_WEBHOOK_SECRET` (32 caractères au moins, `openssl rand -hex 32`) n'est pas dans Vercel. Chaque demande est signée par le serveur du site (HMAC de « horodatage.corps », 5 minutes). Une demande crée ou retrouve la fiche (contact d'origine « formulaire » : jamais de séquence de prospection), diagnostique le domaine de l'adresse, met un appel « Demande entrante » en tête de la page Appels et envoie la synthèse par Brevo (lien de désinscription inclus). 50 demandes par jour au plus.
+- **Site** (projet Vercel du site) : `LEAD_WEBHOOK_SECRET` (le même que le CRM), `CRM_URL` (adresse https du CRM, sans `/` final), puis `LEAD_FORMS_ENABLED=1` seulement quand l'éditeur est renseigné dans `lib/site.ts` (`LEGAL`) et le texte de `/confidentialite` validé. Sans cela, `/test-messagerie` propose la prise de rendez-vous et l'autodiagnostic fonctionne sans formulaire de rappel.
+- **StratCyber** : les boutons « Auto-évaluation » des pages de conformité mènent à `https://www.infracyb.fr/autodiagnostic`.

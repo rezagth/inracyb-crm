@@ -16,19 +16,22 @@ export type QueueEntry = {
   viewedOn: string;
   /** le prospect a répondu à un mail (séquence arrêtée « A répondu ») */
   replied: boolean;
+  /** demande entrante du site (test de messagerie, autodiagnostic) des 7 derniers jours */
+  inbound?: boolean;
   createdAt: number;
 };
 
-export type Heat = "consulte" | "repondu" | "retard" | "jour";
+export type Heat = "entrant" | "consulte" | "repondu" | "retard" | "jour";
 
 export function heatOf(e: QueueEntry, today: string): Heat {
+  if (e.inbound) return "entrant";
   if (e.viewedOn && e.viewedOn >= addDaysIso(today, -HOT_DAYS)) return "consulte";
   if (e.replied) return "repondu";
   return e.dueDate < today ? "retard" : "jour";
 }
 
-const RANK: Record<Heat, number> = { consulte: 0, repondu: 1, retard: 2, jour: 3 };
-export const HEAT_LABEL: Record<Heat, string> = { consulte: "A consulté la synthèse", repondu: "A répondu", retard: "En retard", jour: "Aujourd'hui" };
+const RANK: Record<Heat, number> = { entrant: 0, consulte: 1, repondu: 2, retard: 3, jour: 4 };
+export const HEAT_LABEL: Record<Heat, string> = { entrant: "Demande entrante", consulte: "A consulté la synthèse", repondu: "A répondu", retard: "En retard", jour: "Aujourd'hui" };
 
 /**
  * Appels à passer aujourd'hui (échéance aujourd'hui ou passée), les plus chauds d'abord :

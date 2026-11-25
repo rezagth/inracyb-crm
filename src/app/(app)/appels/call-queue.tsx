@@ -28,6 +28,7 @@ export type QueueRow = {
 };
 
 const HEAT_TONE: Record<Heat, string> = {
+  entrant: "ok",
   consulte: "ok",
   repondu: "info",
   retard: "warn",
