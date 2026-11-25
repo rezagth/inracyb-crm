@@ -171,3 +171,19 @@ Textes dans `textes-campagne-prescripteurs.md`, code dans `src/lib/prescripteur-
 - **Séparé de la prospection** : ces mails ne comptent pas dans le plafond quotidien, partent même si une campagne est en pause, et ne consultent pas la liste des désinscrits. Ils portent l'étiquette Brevo `facturation` : un rebond, une plainte ou un clic « se désinscrire » sur un de ces mails crée une tâche prioritaire et n'est jamais compté dans les pauses ni le bilan des campagnes.
 - Sans Brevo configuré, les anciens liens « Préparer l'e-mail » restent affichés.
 - Aucune migration de base.
+
+## Phase I : synthèse en lien, Pack dans les mails, file d'appels du jour
+
+**Migrations, avant de déployer le code** (branche de sauvegarde Neon d'abord), dans cet ordre :
+
+```bash
+psql "$PROD_URL" -X -v ON_ERROR_STOP=1 -f drizzle-manuel-prescripteurs.sql   # lot P2, s'il n'est pas déjà passé
+psql "$PROD_URL" -X -v ON_ERROR_STOP=1 -f drizzle-manuel-appels.sql          # phase I : tasks.kind
+```
+
+Les deux fichiers sont rejouables sans danger. Sans eux, la fiche entreprise et la page Appels plantent (colonnes absentes).
+
+- **Lien public `/r/<jeton>`** : synthèse de diagnostic lisible sans compte, jeton signé avec `AUTH_SECRET`, valable 60 jours. Changer `AUTH_SECRET` invalide tous les liens déjà envoyés (et déconnecte la session). L'adresse des liens vient de `APP_URL`, sinon du domaine de production Vercel.
+- **Consultation** : une ouverture humaine (robots, antivirus de messagerie et ouvertures dans les 2 minutes après un envoi écartés) note « Rapport de diagnostic consulté » sur la fiche et met un appel du jour en tête de la file.
+- **Textes Diagnostic** : J+3 contient le lien de la synthèse, J+7 le Pack (prix pilote tant qu'aucun devis accepté n'a épuisé les 3 places) et le lien de réservation de Paramètres > Intégrations (sans lien Cal, la phrase de réservation est omise). Tableau 5 de `textes-campagne-diagnostic-v2.md`.
+- **Page Appels** : file « À appeler aujourd'hui » (tâches `kind = 'appel'`), résultat en un clic.
