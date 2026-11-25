@@ -526,6 +526,8 @@ test("prescripteurs : séquence J0 puis J+7, texte sans commission pour les cabi
   assert.match(mailTo("contact@comptaplus.fr")[0].textContent, /commence par le domaine de Compta Plus/);
   assert.deepEqual([(await itemOf(avocat)).nextStep, (await itemOf(avocat)).nextDue], [1, addDaysIso(T, 7)]);
   assert.equal(await itemOf(courtier), undefined);
+  // Un prescripteur n'est pas un prospect : le mail ne le fait pas avancer dans le pipeline.
+  assert.equal((await db.select({ stage: schema.companies.stage }).from(schema.companies).where(eq(schema.companies.id, avocat)))[0].stage, "qualif");
 
   // Un cabinet contacté comme prescripteur n'est plus prospecté comme client, même après la séquence.
   const audit = await createCampaignAction("Audit cabinets", "audit", [avocat]);

@@ -4,6 +4,7 @@ import { useActionState, useRef, useEffect, useTransition } from "react";
 import { addActivityAction, addContactAction, deleteContactAction, deleteCompanyAction, moveStageAction } from "@/server/actions/companies";
 import { createTaskAction } from "@/server/actions/tasks";
 import { replyReceivedAction } from "@/server/actions/campaigns";
+import { becomePartnerAction, setReferrerAction } from "@/server/actions/referrals";
 import { useToast } from "@/components/mod/toast";
 import { STAGES } from "@/lib/constants";
 import { today } from "@/lib/format";
@@ -191,5 +192,48 @@ export function DeleteCompanyButton({ id }: { id: string }) {
       <Icon name="trash" />
       Supprimer
     </button>
+  );
+}
+
+export function BecomePartnerButton({ companyId }: { companyId: string }) {
+  const [pending, start] = useTransition();
+  const toast = useToast();
+  return (
+    <button
+      type="button"
+      className="btn btn-pri btn-sm"
+      disabled={pending}
+      onClick={() => window.confirm("Le cabinet accepte de recommander InfraCyb ? Sa fiche Partenaire sera créée (statut Actif).") && start(async () => { const r = await becomePartnerAction(companyId); toast(r.ok ? r.message : r.error); })}
+    >
+      <Icon name="check" />
+      Devient partenaire
+    </button>
+  );
+}
+
+export function ReferrerSelect({ companyId, value, partners }: { companyId: string; value: string; partners: { id: string; name: string; type: string }[] }) {
+  const [pending, start] = useTransition();
+  const toast = useToast();
+  return (
+    <select
+      className="input w-full sm:w-auto"
+      aria-label="Recommandée par"
+      defaultValue={value}
+      disabled={pending}
+      onChange={(e) => {
+        const v = e.target.value;
+        start(async () => {
+          const r = await setReferrerAction(companyId, v);
+          toast(r.ok ? r.message : r.error);
+        });
+      }}
+    >
+      <option value="">Personne (pas de recommandation)</option>
+      {partners.map((p) => (
+        <option key={p.id} value={p.id}>
+          {p.name} · {p.type}
+        </option>
+      ))}
+    </select>
   );
 }

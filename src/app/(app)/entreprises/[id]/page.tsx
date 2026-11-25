@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, asc, desc, eq } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { emailSourceLabel } from "@/lib/campaign";
 import Link from "next/link";
@@ -13,7 +13,10 @@ import { Avatar, Badge, Card, EmptyState, PageHeader, toneFor } from "@/componen
 import { Icon, type IconName } from "@/components/icon";
 import { EnrichButton } from "@/components/enrich-button";
 import { CompanyForm } from "../company-form";
-import { ActivityForm, ContactForm, DeleteCompanyButton, DeleteContactButton, ReplyReceivedButton, StageSelect, TaskForm } from "./forms";
+import { ActivityForm, BecomePartnerButton, ContactForm, DeleteCompanyButton, DeleteContactButton, ReferrerSelect, ReplyReceivedButton, StageSelect, TaskForm } from "./forms";
+import { prescriberKindOf } from "@/lib/prescripteur-mails";
+import { referralDiscountBp } from "@/lib/referrals";
+import { reservedSectors } from "@/server/campaigns";
 import { TaskCheck } from "../../taches/task-check";
 
 /** La recherche d'e-mails lit des sites web : on laisse jusqu'à 60 s à chaque action. */
@@ -39,6 +42,21 @@ export default async function CompanyPage({ params, searchParams }: { params: Pr
   const primary = c.contacts.find((x) => x.isPrimary) ?? c.contacts[0];
   const t = today();
   const stratcyberUrl = stratcyberDossierUrl(process.env.STRATCYBER_URL, c.id);
+  // Prescripteur : cabinet visé par la campagne prescripteurs, déjà contacté à ce titre, ou déjà partenaire.
+  const partnerRow = (await db.select().from(schema.partners).where(eq(schema.partners.companyId, c.id)).limit(1))[0] ?? null;
+  const prescSends = await db.select({ step: schema.mailSends.step, sentOn: schema.mailSends.sentOn }).from(schema.mailSends).where(and(eq(schema.mailSends.companyId, c.id), eq(schema.mailSends.offer, "prescripteur")));
+  const prescItem = (await db
+    .select({ status: schema.mailCampaignItems.status, stopReason: schema.mailCampaignItems.stopReason, nextDue: schema.mailCampaignItems.nextDue })
+    .from(schema.mailCampaignItems)
+    .innerJoin(schema.mailCampaigns, eq(schema.mailCampaigns.id, schema.mailCampaignItems.campaignId))
+    .where(and(eq(schema.mailCampaignItems.companyId, c.id), eq(schema.mailCampaigns.offer, "prescripteur")))
+    .orderBy(desc(schema.mailCampaignItems.createdAt))
+    .limit(1))[0];
+  const isPrescriber = !!partnerRow || prescSends.length > 0 || reservedSectors().includes(c.sector);
+  const prescKind = prescriberKindOf(c.sector);
+  const referrer = c.referredBy ? (await db.select().from(schema.partners).where(eq(schema.partners.id, c.referredBy)).limit(1))[0] ?? null : null;
+  const partnerOptions = (await db.select({ id: schema.partners.id, name: schema.partners.name, type: schema.partners.type, status: schema.partners.status, companyId: schema.partners.companyId }).from(schema.partners).orderBy(asc(schema.partners.name)))
+    .filter((p) => p.companyId !== c.id && (p.status !== "inactif" || p.id === c.referredBy));
   const inSequence = !!(await db.select({ id: schema.mailCampaignItems.id }).from(schema.mailCampaignItems).where(and(eq(schema.mailCampaignItems.companyId, c.id), eq(schema.mailCampaignItems.status, "en_cours"))).limit(1))[0];
 
   return (
@@ -52,6 +70,8 @@ export default async function CompanyPage({ params, searchParams }: { params: Pr
             <Badge tone="neu" dot={false}>
               {c.sector}
             </Badge>
+            {isPrescriber && <Badge tone="info" dot={false}>{partnerRow ? "Partenaire prescripteur" : "Prescripteur"}</Badge>}
+            {referrer && <span className="text-subtle-fg">Recommandée par {referrer.name}</span>}
             <span className="text-subtle-fg">{OFFERS.find((o) => o.id === c.offer)?.label}</span>
             {primary && (
               <span className="text-subtle-fg">
@@ -214,6 +234,27 @@ export default async function CompanyPage({ params, searchParams }: { params: Pr
         </div>
       )}
 
+      {tab === "suivi" && isPrescriber && (
+        <Card
+          title="Prescripteur"
+          className="mb-4"
+          actions={partnerRow ? <Link href="/partenaires" className="btn btn-sec btn-sm">Voir le partenaire</Link> : <BecomePartnerButton companyId={c.id} />}
+        >
+          <div className="flex flex-col gap-1.5 px-5 py-4 text-[13px]">
+            <p className="text-muted-fg">
+              {prescKind === "reglemente" ? "Profession réglementée : aucune commission ; un client recommandé a 10 % de remise." : "Apporteur : 15 % du HT de la première facture d'un client recommandé, avec un accord écrit."}
+            </p>
+            <p>
+              {prescSends.length === 0
+                ? "Pas encore contacté comme prescripteur (onglet Prescripteurs de la page Campagnes)."
+                : `Contacté comme prescripteur : ${prescSends.map((x) => `${x.step === 0 ? "J0" : "J+7"} le ${fd(x.sentOn)}`).join(", ")}.`}
+              {prescItem && prescItem.status === "en_cours" ? ` Prochain envoi le ${fd(prescItem.nextDue)}.` : prescItem?.stopReason ? ` Séquence : ${prescItem.stopReason.toLowerCase()}.` : ""}
+            </p>
+            {partnerRow && <p>Partenaire depuis le {fd(partnerRow.createdAt.toISOString().slice(0, 10))} · {partnerRow.commission || "—"}</p>}
+          </div>
+        </Card>
+      )}
+
       {tab === "suivi" && (
         <div className="grid gap-4 lg:grid-cols-2">
           <Card title="Rendez-vous et appels" actions={<Link href={`/rdv?new=1&co=${c.id}`} className="btn btn-sec btn-sm"><Icon name="plus" />Rendez-vous</Link>}>
@@ -302,6 +343,11 @@ export default async function CompanyPage({ params, searchParams }: { params: Pr
         <Card className="p-6" title="Informations">
           <div className="p-1 pt-5">
             <CompanyForm action={updateCompanyAction.bind(null, c.id)} company={c} />
+          </div>
+          <div className="mt-6 flex flex-wrap items-center gap-3 border-t border-border-subtle pt-4 text-[13px]">
+            <span className="font-medium">Recommandée par</span>
+            <ReferrerSelect companyId={c.id} value={c.referredBy ?? ""} partners={partnerOptions} />
+            {referrer && referralDiscountBp({ type: referrer.type, name: referrer.name, specialty: referrer.specialty }) > 0 && <span className="text-xs text-muted-fg">Remise de 10 % prévue sur ses devis.</span>}
           </div>
           <div className="mt-6 flex items-center justify-between gap-3 border-t border-border-subtle pt-4">
             <span className="text-xs text-subtle-fg">Créée le {fdt(c.createdAt)}</span>

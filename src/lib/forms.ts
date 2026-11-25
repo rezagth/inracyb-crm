@@ -1,5 +1,6 @@
 /** Définitions des formulaires génériques (partagées client/serveur, sans accès base). */
 import { addDays, today } from "./format";
+import { PARTNER_TYPES } from "./referrals";
 
 export type FieldKind = "text" | "number" | "date" | "time" | "select" | "area" | "company" | "mission" | "email";
 export type FieldDef = { k: string; l: string; kind: FieldKind; opts?: readonly (readonly [string, string])[]; full?: boolean; ph?: string; required?: boolean };
@@ -52,7 +53,7 @@ export const FORMS: Record<string, FormDef> = {
     defaults: () => ({ name: "", type: "Partenaire (j'oriente)", specialty: "", contact: "", commission: "", status: "a_contacter" }),
     fields: [
       { k: "name", l: "Nom *", kind: "text", full: true, required: true },
-      { k: "type", l: "Type", kind: "select", opts: o("Partenaire (j'oriente)", "Apporteur d'affaires", "Sous-traitant") },
+      { k: "type", l: "Type", kind: "select", opts: o(...PARTNER_TYPES) },
       { k: "specialty", l: "Spécialité", kind: "text" },
       { k: "contact", l: "Contact (nom, e-mail, téléphone)", kind: "text", full: true },
       { k: "commission", l: "Commission", kind: "text" },

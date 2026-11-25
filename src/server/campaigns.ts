@@ -325,7 +325,8 @@ export async function runCampaigns(opts: { campaignId?: string; budgetMs?: numbe
         if (viaBrevo) {
           await tx.insert(schema.mailSends).values({ companyId: c.id, offer, step, subject, sentOn });
           await logEvent(tx, c.id, "mail", `Mail ${stepLabel(service, step)} envoyé par la campagne « ${campaign.name} » (${offerLabel(offer)}) : « ${subject} »`);
-          if (c.stage !== "perdu" && stageRank(c.stage) < stageRank("contacte")) await tx.update(schema.companies).set({ stage: "contacte" }).where(eq(schema.companies.id, c.id));
+          // Un prescripteur n'est pas un prospect : son mail ne le fait pas avancer dans le pipeline commercial.
+          if (service !== "prescripteur" && c.stage !== "perdu" && stageRank(c.stage) < stageRank("contacte")) await tx.update(schema.companies).set({ stage: "contacte" }).where(eq(schema.companies.id, c.id));
           await tx.update(schema.companies).set({ lastContact: sentOn }).where(eq(schema.companies.id, c.id));
           // Diagnostic : le mail J+3 est parti, le CRM prépare l'appel du lendemain (J+4) avec le constat et les phrases d'ouverture.
           if (service === "diagnostic" && step === 1) {

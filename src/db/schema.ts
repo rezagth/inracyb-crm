@@ -3,7 +3,7 @@
  * Montants en centimes (entiers) pour éviter les erreurs d'arrondi.
  * Dates « métier » (émission, échéance…) au format AAAA-MM-JJ ; horodatages en millisecondes.
  */
-import { pgTable, text, integer, doublePrecision, boolean, timestamp, index, uniqueIndex } from "drizzle-orm/pg-core";
+import { pgTable, text, integer, doublePrecision, boolean, timestamp, index, uniqueIndex, type AnyPgColumn } from "drizzle-orm/pg-core";
 import { relations, sql } from "drizzle-orm";
 import { createId } from "../lib/ids";
 
@@ -100,10 +100,12 @@ export const companies = pgTable(
     offer: text("offer").notNull().default("Audit"),
     notes: text("notes").notNull().default(""),
     lastContact: text("last_contact"),
+    /** Partenaire (prescripteur) qui a recommandé cette entreprise ; null sinon. */
+    referredBy: text("referred_by").references((): AnyPgColumn => partners.id, { onDelete: "set null" }),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
-  (t) => [index("companies_stage_idx").on(t.stage), index("companies_name_idx").on(t.name)],
+  (t) => [index("companies_stage_idx").on(t.stage), index("companies_name_idx").on(t.name), index("companies_referred_by_idx").on(t.referredBy)],
 );
 
 export const contacts = pgTable(
@@ -472,6 +474,8 @@ export const partners = pgTable("partners", {
   commission: text("commission").notNull().default(""),
   status: text("status").notNull().default("a_contacter"),
   leads: integer("leads").notNull().default(0),
+  /** Fiche du cabinet dans le CRM (prescripteur devenu partenaire) ; null pour un partenaire saisi à la main. */
+  companyId: text("company_id").references((): AnyPgColumn => companies.id, { onDelete: "set null" }),
   createdAt: createdAt(),
 });
 
@@ -671,7 +675,11 @@ export const savedReports = pgTable("saved_reports", { id: id(), name: text("nam
 export const favorites = pgTable("favorites", { id: id(), label: text("label").notNull(), href: text("href").notNull(), position: integer("position").notNull().default(0), createdAt: createdAt() });
 
 /* ---------- relations ---------- */
-export const companiesRelations = relations(companies, ({ many }) => ({
+export const companiesRelations = relations(companies, ({ one, many }) => ({
+  /** Partenaire qui a recommandé l'entreprise. */
+  referrer: one(partners, { fields: [companies.referredBy], references: [partners.id], relationName: "referral" }),
+  /** Fiches Partenaire reliées à ce cabinet. */
+  partnerOf: many(partners, { relationName: "partnerCompany" }),
   contacts: many(contacts),
   events: many(events),
   tasks: many(tasks),
@@ -728,3 +736,7 @@ export const auditsRelations = relations(audits, ({ one }) => ({ company: one(co
 export const incidentsRelations = relations(incidents, ({ one }) => ({ company: one(companies, { fields: [incidents.companyId], references: [companies.id] }) }));
 export const documentsRelations = relations(documents, ({ one }) => ({ company: one(companies, { fields: [documents.companyId], references: [companies.id] }) }));
 export const bankLinesRelations = relations(bankLines, ({ one }) => ({ invoice: one(invoices, { fields: [bankLines.invoiceId], references: [invoices.id] }) }));
+export const partnersRelations = relations(partners, ({ one, many }) => ({
+  company: one(companies, { fields: [partners.companyId], references: [companies.id], relationName: "partnerCompany" }),
+  referrals: many(companies, { relationName: "referral" }),
+}));
