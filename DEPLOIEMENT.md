@@ -260,3 +260,18 @@ psql "$PROD_URL" -X -v ON_ERROR_STOP=1 -f drizzle-manuel-phase-q.sql
 - **Page Marketing** : carte « Posts à publier », avec le texte (bouton « Copier le texte »), l'aperçu de l'image (bouton « Télécharger l'image »), « Marquer comme publié » et « Modifier ». Le formulaire « Nouvelle publication » accepte le texte et les trois champs de l'image.
 - **Image** : générée par le CRM en 1200 × 1200 (`/api/posts/<id>/image`, connexion obligatoire) à partir de trois champs : surtitre, chiffre ou phrase forte, légende.
 - **Mail** (`/api/cron/linkedin`, mardi et jeudi à 6 h UTC, soit 7 h à Paris l'hiver) : s'il y a un post LinkedIn prévu ce jour-là et pas encore publié, le texte part par mail avec l'image en pièce jointe. Destinataire : `REPORT_TO_EMAIL`, sinon l'e-mail du profil.
+
+## Phase R : publication automatique sur LinkedIn
+
+**Migration, avant de déployer le code** (branche de sauvegarde Neon d'abord) : `drizzle-manuel-phase-r.sql` ajoute `posts.external_url` et la table `linkedin_auth`. Rejouable sans danger.
+
+```bash
+psql "$PROD_URL" -X -v ON_ERROR_STOP=1 -f drizzle-manuel-phase-r.sql
+```
+
+**Application LinkedIn (une fois)** : developer.linkedin.com → My Apps → Create app (rattachée à la page entreprise InfraCyb) → onglet Products : « Sign In with LinkedIn using OpenID Connect » et « Share on LinkedIn » → onglet Auth : adresse de retour `<APP_URL>/api/linkedin/callback` (affichée sur la page Marketing) → copier Client ID et Client Secret dans Vercel (`LINKEDIN_CLIENT_ID`, `LINKEDIN_CLIENT_SECRET`), jamais ailleurs. `APP_URL` doit être renseignée. Redéployer, puis page Marketing → « Connecter LinkedIn ».
+
+- **Publication** (`/api/cron/linkedin`, mardi et jeudi à 7 h UTC, soit 8 h – 9 h à Paris l'hiver) : le post du jour au statut « Programmé » est publié sur le profil, avec son image, puis passe en « Publié » avec son lien ; mail « Publié ✅ » avec le lien. Jamais deux fois (verrou « en cours »). Seul « Programmé » part : « Idée » et « Rédigé » ne partent jamais.
+- **Repli** : non connecté, autorisation expirée ou refus de LinkedIn → mail avec le texte et l'image jointe, et l'erreur affichée sur la page Marketing.
+- **Autorisation** : chiffrée (AES-256-GCM, clé tirée d'`AUTH_SECRET`), valable 60 jours, non renouvelable automatiquement (réservé aux partenaires agréés de LinkedIn). Alerte 10 jours avant dans le mail du post et le rapport du lundi. Changer `AUTH_SECRET` oblige à reconnecter LinkedIn.
+- Un post resté au statut « en_cours » (coupure pendant la publication) n'est jamais republié automatiquement : vérifier sur LinkedIn, puis le passer en « Publié » ou « Programmé ».

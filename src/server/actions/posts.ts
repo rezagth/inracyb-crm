@@ -6,6 +6,7 @@ import { z } from "zod";
 import { db, schema } from "@/db";
 import { requireUser } from "@/lib/auth";
 import { visualJson } from "@/lib/post-visual";
+import { disconnectLinkedin } from "../linkedin";
 
 type R = { ok: true; message: string } | { ok: false; error: string };
 
@@ -30,4 +31,12 @@ export async function markPostPublishedAction(id: string): Promise<R> {
   await db.update(schema.posts).set({ status: "publie" }).where(eq(schema.posts.id, p.data));
   revalidatePath("/marketing");
   return { ok: true, message: "Publié : bravo !" };
+}
+
+/** Retire l'autorisation LinkedIn du CRM (les posts ne partent plus tout seuls ; le mail manuel prend le relais). */
+export async function disconnectLinkedinAction(): Promise<R> {
+  await requireUser();
+  await disconnectLinkedin();
+  revalidatePath("/marketing");
+  return { ok: true, message: "LinkedIn déconnecté" };
 }

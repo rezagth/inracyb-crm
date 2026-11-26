@@ -648,7 +648,27 @@ export const posts = pgTable("posts", {
   body: text("body").notNull().default(""),
   /** Image du post (phase Q), JSON { kicker, big, sub } : le CRM la génère en 1200 × 1200. "" = pas d'image. */
   visual: text("visual").notNull().default(""),
+  /** Lien du post une fois publié automatiquement sur LinkedIn (phase R) ; "" sinon. */
+  externalUrl: text("external_url").notNull().default(""),
   createdAt: createdAt(),
+});
+
+/**
+ * Autorisation de publier sur LinkedIn (phase R), une seule ligne (id = 1). Le jeton est chiffré (AES-256-GCM, clé tirée
+ * d'AUTH_SECRET) : jamais en clair dans la base. LinkedIn le fait expirer au bout de 60 jours.
+ */
+export const linkedinAuth = pgTable("linkedin_auth", {
+  id: integer("id").primaryKey(),
+  /** jeton d'accès chiffré ; "" = non connecté */
+  tokenEnc: text("token_enc").notNull().default(""),
+  /** identifiant du membre (« urn:li:person:… »), auteur des posts */
+  personUrn: text("person_urn").notNull().default(""),
+  /** nom affiché du compte connecté */
+  name: text("name").notNull().default(""),
+  expiresAt: timestamp("expires_at", { mode: "date", withTimezone: true }),
+  /** dernière erreur de publication, pour l'afficher sur la page Marketing */
+  lastError: text("last_error").notNull().default(""),
+  updatedAt: timestamp("updated_at", { mode: "date", withTimezone: true }).notNull().defaultNow(),
 });
 
 export const obligations = pgTable("obligations", {

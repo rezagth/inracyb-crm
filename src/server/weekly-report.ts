@@ -9,6 +9,8 @@ import { leadsSince } from "./lead";
 import { composeCallDigest } from "@/lib/call-queue";
 import { callQueue } from "./call-queue";
 import { appUrl } from "./campaigns";
+import { reconnectNotice } from "@/lib/post-visual";
+import { linkedinStatus } from "./linkedin";
 
 
 export type WeeklyRun = { ok: boolean; sent: boolean; message: string };
@@ -27,7 +29,9 @@ export async function sendWeeklyReport(): Promise<WeeklyRun> {
     const to = await recipient();
     if (!to) return { ok: false, sent: false, message: "Aucun destinataire : renseigne REPORT_TO_EMAIL ou l'e-mail du profil." };
     const report = composeWeeklyReport(await prospectRecords(), today(), await pilotsSigned(), await checkSender(), await leadsSince(new Date(Date.now() - 7 * 86_400_000)));
-    const r = await sendBrevoMail({ to: { email: to }, subject: report.subject, text: report.text, tags: ["rapport-hebdo"] });
+    // Phase R : alerte si l'autorisation LinkedIn arrive à expiration (les posts ne partiraient plus tout seuls).
+    const notice = reconnectNotice(await linkedinStatus(), appUrl());
+    const r = await sendBrevoMail({ to: { email: to }, subject: report.subject, text: notice ? `${notice}\n\n${report.text}` : report.text, tags: ["rapport-hebdo"] });
     return r.ok ? { ok: true, sent: true, message: "Rapport envoyé." } : { ok: false, sent: false, message: r.error };
   } catch (e) {
     return { ok: false, sent: false, message: e instanceof Error ? e.message.slice(0, 300) : "Rapport impossible." };

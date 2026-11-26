@@ -49,3 +49,25 @@ export function composePostMail(p: PostRow, appUrl: string): { subject: string; 
     ].join("\n\n") + "\n",
   };
 }
+
+/** Mail après une publication automatique réussie (phase R) : le lien, et ce qui compte dans la première heure. */
+export function composePublishedMail(p: PostRow, url: string): { subject: string; text: string } {
+  return {
+    subject: `Publié sur LinkedIn ✅ ${p.topic}`,
+    text: [
+      "Bonjour,",
+      "Le CRM vient de publier le post du jour sur ton profil LinkedIn, avec son image.",
+      url ? `Le post : ${url}` : "",
+      "La première heure compte le plus :",
+      "1. Réponds à chaque commentaire, même d'un mot.\n2. Commente 2 ou 3 posts de personnes de ta cible (agences immobilières, cabinets, ESN).\n3. Envoie 5 à 10 invitations à des dirigeants de ta cible, sans message commercial.",
+    ].filter(Boolean).join("\n\n") + "\n",
+  };
+}
+
+/** Phrase d'alerte quand l'autorisation LinkedIn arrive à expiration ou n'est plus valable ; "" sinon. */
+export function reconnectNotice(s: { kind: string; daysLeft?: number; warn?: boolean }, appUrl: string): string {
+  const where = appUrl ? ` : ${appUrl}/marketing` : " (page Marketing du CRM)";
+  if (s.kind === "expire") return `⚠️ L'autorisation LinkedIn a expiré : les posts ne partent plus tout seuls. Clique sur « Reconnecter LinkedIn »${where}`;
+  if (s.kind === "ok" && s.warn) return `⚠️ L'autorisation LinkedIn expire dans ${s.daysLeft} jour(s). Clique sur « Reconnecter LinkedIn » avant${where}`;
+  return "";
+}
