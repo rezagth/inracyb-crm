@@ -10,7 +10,7 @@ import { PAY_METHODS, UNITS, stageRank } from "@/lib/constants";
 import { addDays, eur, parseEuroToCents, today } from "@/lib/format";
 import { draftNumber, getSettings, logEvent, nextNumber, type DbOrTx } from "../core";
 import { autoOn, bumpRuns } from "../automations";
-import { SUIVI_OFFER, oneOffPart, suiviFromLines } from "@/lib/pack-quote";
+import { oneOffPart, suiviFromLines } from "@/lib/pack-quote";
 
 type Result = { ok: true; id: string; message?: string } | { ok: false; error: string };
 
@@ -123,12 +123,12 @@ export async function acceptQuoteAction(id: string, signer: string): Promise<Res
             await logEvent(tx, q.companyId, "quote", `Devis ${q.number} accepté par ${name.data}`);
             // Devis avec abonnement « Suivi Courrier & Domaine » : le contrat mensuel naît à l'acceptation (une seule fois).
             const lines = await tx.select().from(schema.quoteLines).where(eq(schema.quoteLines.quoteId, id));
-            const monthly = suiviFromLines(lines);
-            if (monthly) {
-              const existing = await tx.select({ id: schema.contracts.id }).from(schema.contracts).where(and(eq(schema.contracts.companyId, q.companyId), eq(schema.contracts.offer, SUIVI_OFFER), eq(schema.contracts.status, "actif"))).limit(1);
+            const sub = suiviFromLines(lines);
+            if (sub) {
+              const existing = await tx.select({ id: schema.contracts.id }).from(schema.contracts).where(and(eq(schema.contracts.companyId, q.companyId), eq(schema.contracts.offer, sub.offer), eq(schema.contracts.status, "actif"))).limit(1);
               if (!existing.length) {
-                await tx.insert(schema.contracts).values({ companyId: q.companyId, offer: SUIVI_OFFER, monthlyCents: monthly, start: today(), notice: "1 mois", status: "actif" });
-                await logEvent(tx, q.companyId, "note", `Contrat mensuel « ${SUIVI_OFFER} » créé : ${eur(monthly)} HT par mois, bilan mensuel automatique.`);
+                await tx.insert(schema.contracts).values({ companyId: q.companyId, offer: sub.offer, monthlyCents: sub.monthlyCents, start: today(), notice: "1 mois", status: "actif" });
+                await logEvent(tx, q.companyId, "note", `Contrat mensuel « ${sub.offer} » créé : ${eur(sub.monthlyCents)} HT par mois, bilan mensuel automatique.`);
               }
             }
           });

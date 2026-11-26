@@ -7,6 +7,7 @@ import { Icon } from "@/components/icon";
 import { useToast } from "@/components/mod/toast";
 import { logCallOutcomeAction } from "@/server/actions/calls";
 import { PackQuoteButton } from "@/components/pack-quote-button";
+import { OFFER_LABEL, OFFER_WHY } from "@/lib/pack-quote";
 import {
   HEAT_LABEL,
   OUTCOME_LABEL,
@@ -174,6 +175,12 @@ function QueueItem({
         </span>
       </div>
       <p className="text-[13px] text-muted-fg">{r.title}</p>
+      {r.recommended && r.offers?.[0] && (
+        <p className="text-[13px]">
+          À proposer : <span className="font-medium">{OFFER_LABEL[r.offers[0]]}</span>
+          <span className="text-muted-fg"> ({OFFER_WHY[r.offers[0]]})</span>
+        </p>
+      )}
       {r.opening && (
         <details className="text-[13px]">
           <summary className="cursor-pointer text-muted-fg">
@@ -224,7 +231,7 @@ function QueueItem({
             <Icon name="cal" />
             RDV obtenu
           </button>
-          <PackQuoteButton companyId={r.companyId} />
+          <PackQuoteButton companyId={r.companyId} offers={r.offers} />
         </div>
         {mode && (
           <div className="flex flex-wrap items-center gap-2 text-[13px]">

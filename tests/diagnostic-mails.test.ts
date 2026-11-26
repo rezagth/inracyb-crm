@@ -150,7 +150,7 @@ test("segments : secteurs admis et codes NAF", () => {
 });
 
 test("tableau 5 : phrases de synthèse, d'offre et de rendez-vous identiques au fichier validé", () => {
-  assert.deepEqual(table("## Tableau 5").map((r) => r[2]), [EXTRA_TEXT.syntheseLien, EXTRA_TEXT.syntheseSansLien, EXTRA_TEXT.offrePilote, EXTRA_TEXT.offrePublic, EXTRA_TEXT.priseRdv]);
+  assert.deepEqual(table("## Tableau 5").map((r) => r[2]), [EXTRA_TEXT.syntheseLien, EXTRA_TEXT.syntheseSansLien, EXTRA_TEXT.offrePilote, EXTRA_TEXT.offrePublic, EXTRA_TEXT.priseRdv, EXTRA_TEXT.offreKit, EXTRA_TEXT.offreDossier]);
 });
 
 test("liens : synthèse à J+3, réservation à J+7, jamais à J0 ni J+14 ; offre Pack pour la messagerie seulement", () => {
@@ -190,4 +190,16 @@ test("segment Immobilier : secteur Immobilier seulement, texte d'impact et J+7 p
   assert.match(j7.body, /loyers, dépôts de garantie et appels de fonds/);
   assert.match(j7.body, /Pack Courrier sécurisé, à 290 € HT/);
   assert.match(j7.body, /créneau directement : https:\/\/cal\.com\/jean\/15min/);
+});
+
+test("phase O : J+7 ajoute l'offre du segment après le Pack, seulement si son prix est fourni", () => {
+  const prices = { pilotOpen: true, prixPilote: "290 € HT", prixPublic: "390 € HT", prixKit: "450 € HT pour les trois premiers clients", prixDossier: "690 € HT" };
+  const immo = ok({ segment: "immobilier", step: 2, ...prices }).body;
+  assert.ok(immo.includes("au lieu de 390 € HT. Pour aller plus loin contre les faux RIB, le Kit anti-faux-RIB"));
+  assert.ok(immo.includes("à 450 € HT pour les trois premiers clients."));
+  assert.doesNotMatch(immo, /Dossier de preuves vous donne/);
+  const edit = ok({ segment: "editeurs", step: 2, ...prices }).body;
+  assert.ok(edit.includes("le Dossier de preuves vous donne des réponses prêtes et justifiées, à 690 € HT."));
+  assert.doesNotMatch(edit, /Kit anti-faux-RIB/);
+  assert.doesNotMatch(ok({ segment: "cabinets", step: 2, pilotOpen: true, prixPilote: "290 € HT", prixPublic: "390 € HT" }).body, /Kit|Dossier de preuves vous/);
 });

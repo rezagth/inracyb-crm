@@ -1,12 +1,12 @@
 import "server-only";
-import { and, desc, eq, like } from "drizzle-orm";
+import { and, desc, eq, inArray, like } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { EMAIL_RE } from "@/lib/brevo";
 import { siteFromNotes } from "@/lib/contact-extract";
 import { diagnose, parseChecks, targetsOf, type Probe } from "@/lib/diagnostic";
 import { today } from "@/lib/format";
 import { BILAN_EVENT, bilanDue, compareChecks, composeBilan } from "@/lib/monthly-check";
-import { SUIVI_OFFER } from "@/lib/pack-quote";
+import { MONITORED_OFFERS } from "@/lib/pack-quote";
 import { billingSender, brevoConfig, brevoReady, sendBrevoMail } from "./brevo";
 import { getSettings, logEvent } from "./core";
 import { publicProbe } from "./diagnostic";
@@ -15,13 +15,13 @@ import { getProfile } from "./queries";
 export type MonthlyRun = { ok: boolean; sent: number; alerts: number; manual: number; message: string };
 
 /**
- * Bilans mensuels des contrats « Suivi Courrier & Domaine » : nouvelle mesure du domaine, comparaison avec la précédente,
+ * Bilans mensuels des contrats de suivi (« Suivi Courrier & Domaine », « Suivi Sécurité PME ») : nouvelle mesure du domaine, comparaison avec la précédente,
  * mail au contact principal (étiquettes « facturation » et « suivi » : c'est un client, jamais compté contre la prospection),
  * tâche prioritaire si un écart apparaît. Au plus `max` contrats par passage (le reste part au jour ouvré suivant).
  */
 export async function runMonthlyChecks(opts: { probe?: Probe; max?: number } = {}): Promise<MonthlyRun> {
   const t = today();
-  const contracts = await db.select().from(schema.contracts).where(and(eq(schema.contracts.offer, SUIVI_OFFER), eq(schema.contracts.status, "actif")));
+  const contracts = await db.select().from(schema.contracts).where(and(inArray(schema.contracts.offer, MONITORED_OFFERS), eq(schema.contracts.status, "actif")));
   let sent = 0, alerts = 0, manual = 0, done = 0;
   const p = await getProfile();
   const s = await getSettings();

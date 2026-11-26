@@ -234,3 +234,17 @@ psql "$PROD_URL" -X -v ON_ERROR_STOP=1 -f drizzle-manuel-phase-m.sql
 - **Quotas communs** : imports par segment et par jour (`importPerSegment`) et requêtes Google Places du jour (`placesDaily`) valent pour l'ensemble des passages.
 - **Stock borné** : avant une recherche, le diagnostic du stock dispose de 12 secondes au plus ; la tâche de 6 h 30 et les passages suivants finissent le reste.
 - **Page Alimentation** : nouvelle ligne « Intégrées par segment (aujourd'hui / 7 jours) ».
+
+## Phase O : offres demandées (faux RIB, Microsoft 365, dossier de preuves) et abonnement à 149 €
+
+**Migration, avant ou après le code** (branche de sauvegarde Neon d'abord) : `drizzle-manuel-phase-o.sql` ajoute 4 prestations au catalogue. Aucune table modifiée, rejouable sans danger. Le code n'en dépend pas : les devis prennent leurs prix dans `src/lib/pricing.ts`.
+
+```bash
+psql "$PROD_URL" -X -v ON_ERROR_STOP=1 -f drizzle-manuel-phase-o.sql
+```
+
+- **Offres** (`src/lib/pricing.ts`) : Kit anti-faux-RIB 590 € HT (pilote 450 €), Microsoft 365 sécurisé 490 € HT jusqu'à 10 comptes (pilote 390 €), Dossier de preuves 690 € HT, abonnement Suivi Sécurité PME 149 € HT/mois sur 12 mois. Les 3 places pilotes sont communes à toutes les offres.
+- **Messagerie détectée** à partir des mesures existantes (MX, puis SPF) : Microsoft 365, Google Workspace ou autre. Aucune mesure nouvelle.
+- **Recommandation** : agences et cabinets → Kit anti-faux-RIB ; éditeurs → Dossier de preuves ; Microsoft 365 → Microsoft 365 sécurisé ; constat SPF/DMARC → Pack. Affichée dans la file d'appels, le mail du matin et la synthèse `/r/…`.
+- **Devis en un clic** : bouton de l'offre recommandée + menu « Autre offre… » (file d'appels, fiche entreprise). Les nouvelles offres ajoutent la ligne d'abonnement à 149 € (à retirer si le client ne prend que le forfait). À l'acceptation, le contrat « Suivi Sécurité PME » est créé et suivi par le bilan mensuel ; la facture du devis ne reprend que le forfait.
+- **J+7** : après la phrase du Pack, phrase du Kit (agences, cabinets) ou du Dossier de preuves (éditeurs). Tableau 5 de `textes-campagne-diagnostic-v2.md`.

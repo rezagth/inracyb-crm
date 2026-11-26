@@ -256,7 +256,7 @@ test("diagnostic : relances J+3, J+7, J+14 ; constat remesuré avant l'envoi ; a
   assert.equal(j7.subject, "Vos clients et les messages à votre nom");
   assert.match(j7.textContent, /ce que je regarderais en priorité chez Cabinet Diag 1\. Cela vous serait utile \?/);
   // J+7 : le Pack est nommé, au prix pilote tant qu'aucun client pilote n'a signé ; sans lien de réservation renseigné, pas de phrase de rendez-vous.
-  assert.match(j7.textContent, /Pour le point relevé sur diag1\.fr, la correction est un forfait : le Pack Courrier sécurisé, à 290\s€ HT pour les trois premiers clients, au lieu de 390\s€ HT\.\n\n/);
+  assert.match(j7.textContent, /Pour le point relevé sur diag1\.fr, la correction est un forfait : le Pack Courrier sécurisé, à 290\s€ HT pour les trois premiers clients, au lieu de 390\s€ HT\. Pour aller plus loin contre les faux RIB, le Kit anti-faux-RIB [^\n]+ à 450\s€ HT pour les trois premiers clients\.\n\n/); // phase O : offre du segment après le Pack
   assert.doesNotMatch(j7.textContent, /créneau directement/);
   assert.equal(j14.subject, "Dernier message de ma part");
   assert.match(j14.textContent, /Si le sujet devient utile pour Cabinet Diag 1, la synthèse d'une page sur diag1\.fr reste disponible : il suffit de me répondre\.\n\nBonne continuation,\n\nJean Test/);

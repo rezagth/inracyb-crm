@@ -375,3 +375,19 @@ export function parseChecks(json: string): Check[] {
     return [];
   }
 }
+
+export type MailProvider = "microsoft365" | "google" | "autre" | "";
+export const MAIL_PROVIDER_LABEL: Record<Exclude<MailProvider, "">, string> = { microsoft365: "Microsoft 365", google: "Google Workspace", autre: "Autre messagerie" };
+
+/**
+ * Messagerie utilisée, déduite des mesures déjà faites (serveurs MX, puis SPF quand un filtre est placé devant les MX).
+ * Aucune mesure nouvelle. "" : rien de mesuré.
+ */
+export function mailProvider(checks: Check[]): MailProvider {
+  const proof = (id: string) => checks.find((c) => c.id === id && c.status !== "erreur")?.proof.toLowerCase() ?? "";
+  const mx = proof("mx");
+  const spf = proof("spf");
+  if (/\.mail\.protection\.outlook\.com/.test(mx) || /include:spf\.protection\.outlook\.com/.test(spf)) return "microsoft365";
+  if (/(aspmx\.l\.google\.com|googlemail\.com|smtp\.google\.com)/.test(mx) || /include:_spf\.google\.com/.test(spf)) return "google";
+  return mx && !/^aucun|mx nul/.test(mx) ? "autre" : "";
+}

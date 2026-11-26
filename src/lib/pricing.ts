@@ -39,3 +39,17 @@ export function packOfferText(slotsLeft: number): string {
 export function suiviOfferText(slotsLeft: number): string {
   return `Ensuite, le suivi mensuel (${euros(suiviMonthlyCents(slotsLeft))} par mois, ${SUIVI_COURRIER.minMonths} mois minimum) mène DMARC jusqu'au blocage des usurpations, vérifie chaque mois que rien ne s'est dégradé et vous envoie un bilan d'une page, utile face à un client ou à votre assureur.`;
 }
+
+/**
+ * Offres de la phase O (26/11/2026), d'après la demande observée : piratage de messagerie (2e menace des entreprises,
+ * Cybermalveillance 2024), fraude au faux RIB, questionnaires des assureurs et des clients. Prix en centimes HT, à valider.
+ * Les 3 places pilotes sont communes à toutes les offres (comptées par devis accepté, voir pilotsSigned).
+ */
+export const KIT_FAUX_RIB = { publicCents: 59000, pilotCents: 45000 } as const;
+export const M365_SECURISE = { publicCents: 49000, pilotCents: 39000, maxAccounts: 10 } as const;
+export const DOSSIER_PREUVES = { publicCents: 69000, pilotCents: 69000 } as const;
+/** Abonnement complet : suivi du courrier, contrôle trimestriel de Microsoft 365, dossier de preuves mis à jour, 1 h d'assistance par mois. */
+export const SUIVI_PME = { monthlyCents: 14900, minMonths: 12 } as const;
+
+/** Prix d'une offre forfaitaire selon qu'il reste des places pilotes. */
+export const offerCents = (o: { publicCents: number; pilotCents: number }, slotsLeft: number): number => (slotsLeft > 0 ? o.pilotCents : o.publicCents);

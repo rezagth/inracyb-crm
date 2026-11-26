@@ -4,6 +4,7 @@ import { db, schema } from "@/db";
 import { parseChecks } from "@/lib/diagnostic";
 import { mailAuthFinding, type ReportCta } from "@/lib/diagnostic-report";
 import { packOfferText, pilotSlotsLeft, suiviOfferText } from "@/lib/pricing";
+import { offerPitch, offersForCompany } from "@/lib/pack-quote";
 import { reportLinkFor } from "./campaigns";
 import { getProfile, pilotsSigned } from "./queries";
 
@@ -14,9 +15,12 @@ export async function latestReportLink(companyId: string): Promise<string | null
 }
 
 /** Encadré d'action du rapport public : offre Pack puis suivi mensuel, seulement pour un constat de messagerie. */
-export async function reportCta(findingsJson: string): Promise<ReportCta> {
+export async function reportCta(findingsJson: string, sector = ""): Promise<ReportCta> {
   const p = await getProfile();
   const slots = pilotSlotsLeft(await pilotsSigned());
-  const offer = mailAuthFinding(parseChecks(findingsJson)) ? `${packOfferText(slots)} ${suiviOfferText(slots)}` : "";
+  // Phase O : l'offre la plus pertinente pour le secteur et la messagerie, puis le Pack si un constat de courrier le justifie.
+  const top = offersForCompany(sector, findingsJson).find((k) => k !== "pack");
+  const pack = mailAuthFinding(parseChecks(findingsJson)) ? `${packOfferText(slots)} ${suiviOfferText(slots)}` : "";
+  const offer = [top ? offerPitch(top, slots) : "", pack].filter(Boolean).join(" ");
   return { offer, calUrl: p.calUrl, contact: [p.phone, p.email].map((x) => x.trim()).filter(Boolean).join(" · ") };
 }

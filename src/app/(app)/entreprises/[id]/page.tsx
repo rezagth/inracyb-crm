@@ -13,6 +13,7 @@ import { Avatar, Badge, Card, EmptyState, PageHeader, toneFor } from "@/componen
 import { Icon, type IconName } from "@/components/icon";
 import { EnrichButton } from "@/components/enrich-button";
 import { PackQuoteButton } from "@/components/pack-quote-button";
+import { offerMenuForCompany } from "@/lib/pack-quote";
 import { CompanyForm } from "../company-form";
 import { ActivityForm, BecomePartnerButton, ContactForm, DeleteCompanyButton, DeleteContactButton, ReferrerSelect, ReplyReceivedButton, StageSelect, TaskForm } from "./forms";
 import { prescriberKindOf } from "@/lib/prescripteur-mails";
@@ -64,6 +65,9 @@ export default async function CompanyPage({ params, searchParams }: { params: Pr
 
   // Synthèse de diagnostic à envoyer au prospect : lien signé, valable 60 jours à partir de maintenant.
   const reportLink = await latestReportLink(c.id);
+  // Offre recommandée (phase O) : secteur et constats du dernier diagnostic.
+  const lastDiag = (await db.select({ findings: schema.companyDiagnostics.findings }).from(schema.companyDiagnostics).where(and(eq(schema.companyDiagnostics.companyId, c.id), eq(schema.companyDiagnostics.status, "fait"))).orderBy(desc(schema.companyDiagnostics.createdAt)).limit(1))[0];
+  const offers = offerMenuForCompany(c.sector, lastDiag?.findings ?? "[]");
 
   return (
     <>
@@ -198,7 +202,7 @@ export default async function CompanyPage({ params, searchParams }: { params: Pr
 
       {tab === "documents" && (
         <div className="grid gap-4 lg:grid-cols-2">
-          <Card title="Devis" actions={<div className="flex gap-2"><PackQuoteButton companyId={c.id} /><Link href={`/devis/nouveau?co=${c.id}`} className="btn btn-sec btn-sm"><Icon name="plus" />Devis</Link></div>}>
+          <Card title="Devis" actions={<div className="flex gap-2"><PackQuoteButton companyId={c.id} offers={offers} /><Link href={`/devis/nouveau?co=${c.id}`} className="btn btn-sec btn-sm"><Icon name="plus" />Devis</Link></div>}>
             {c.quotes.length === 0 ? (
               <EmptyState title="Aucun devis" />
             ) : (

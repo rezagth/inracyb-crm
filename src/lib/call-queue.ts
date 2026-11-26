@@ -3,6 +3,7 @@
  * Règles pures (sans base ni réseau) : la page Appels et l'action serveur s'appuient dessus.
  */
 import { addDaysIso, isBusinessDay } from "./campaign";
+import { OFFER_LABEL, type OfferKey } from "./pack-quote";
 
 /** Essais sans réponse (pas de réponse, messagerie) avant d'abandonner l'appel. */
 export const MAX_ATTEMPTS = 3;
@@ -134,6 +135,10 @@ export type QueueRow = {
   dueDate: string;
   opening: string;
   attempts: number;
+  /** offres à proposer, la plus pertinente d'abord (phase O) */
+  offers?: OfferKey[];
+  /** true : la première offre est une vraie recommandation (secteur, constat ou messagerie), pas l'ordre par défaut */
+  recommended?: boolean;
 };
 
 /**
@@ -149,7 +154,8 @@ export function composeCallDigest(rows: QueueRow[], today: string, appUrl: strin
   const lines = rows.slice(0, 25).map((r, i) => {
     const who = [r.company, r.contact].filter(Boolean).join(" — ");
     const finding = r.title.split(" : ").slice(1).join(" : ");
-    return `${i + 1}. [${HEAT_LABEL[r.heat]}] ${who}\n   ${r.phone || "pas de numéro"}${finding ? ` · ${finding}` : ""}${r.attempts ? ` · ${r.attempts} essai(s) sans réponse` : ""}`;
+    const offer = r.recommended && r.offers?.[0] ? `\n   À proposer : ${OFFER_LABEL[r.offers[0]]}` : "";
+    return `${i + 1}. [${HEAT_LABEL[r.heat]}] ${who}\n   ${r.phone || "pas de numéro"}${finding ? ` · ${finding}` : ""}${r.attempts ? ` · ${r.attempts} essai(s) sans réponse` : ""}${offer}`;
   });
   const more = rows.length > 25 ? `\n… et ${rows.length - 25} autre(s).` : "";
   const url = appUrl ? `\n\nLa file, les phrases d'ouverture et le bouton « Devis Pack + Suivi » : ${appUrl}/appels` : "";

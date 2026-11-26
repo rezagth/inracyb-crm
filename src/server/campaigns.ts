@@ -44,7 +44,7 @@ import { brevoConfig, sendBrevoMail } from "./brevo";
 import { publicProbe } from "./diagnostic";
 import { logEvent } from "./core";
 import { getProfile, pilotsSigned } from "./queries";
-import { euros, PACK_COURRIER, pilotSlotsLeft } from "@/lib/pricing";
+import { DOSSIER_PREUVES, euros, KIT_FAUX_RIB, PACK_COURRIER, pilotSlotsLeft } from "@/lib/pricing";
 import { makeReportToken } from "@/lib/report-link";
 
 /** Adresse publique du CRM (pour le lien de désinscription) : APP_URL, sinon le domaine de production Vercel. */
@@ -270,7 +270,7 @@ async function prepareDiagnosticMail(a: { companyId: string; companyName: string
   // J+3 : lien signé vers la synthèse mesurée le jour même. J+7 : offre Pack (prix pilote tant qu'il reste des places) et réservation.
   const reportUrl = a.step === 1 && diagnosticId ? (reportLinkFor(diagnosticId) ?? undefined) : undefined;
   const pilotOpen = a.step === 2 ? pilotSlotsLeft(await pilotsSigned()) > 0 : false;
-  const m = buildDiagnosticMail({ segment, step: a.step, hook, checks, mailDomain, webHost, prenom: a.firstName, sansPrenom: greetsWithoutName(a.email, a.emailSource), entreprise: a.companyName, me: a.profile.me, signature: a.signature, reportUrl, calUrl: a.profile.calUrl, pilotOpen, prixPilote: euros(PACK_COURRIER.pilotCents), prixPublic: euros(PACK_COURRIER.publicCents) });
+  const m = buildDiagnosticMail({ segment, step: a.step, hook, checks, mailDomain, webHost, prenom: a.firstName, sansPrenom: greetsWithoutName(a.email, a.emailSource), entreprise: a.companyName, me: a.profile.me, signature: a.signature, reportUrl, calUrl: a.profile.calUrl, pilotOpen, prixPilote: euros(PACK_COURRIER.pilotCents), prixPublic: euros(PACK_COURRIER.publicCents), prixKit: pilotOpen ? `${euros(KIT_FAUX_RIB.pilotCents)} pour les trois premiers clients` : euros(KIT_FAUX_RIB.publicCents), prixDossier: euros(DOSSIER_PREUVES.publicCents) });
   return m.ok ? { mail: { subject: m.subject, body: m.body }, hook } : { error: m.error };
 }
 

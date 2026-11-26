@@ -31,10 +31,10 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ token: stri
   if (!id) return gone();
   const d = (await db.select().from(schema.companyDiagnostics).where(eq(schema.companyDiagnostics.id, id)).limit(1))[0];
   if (!d || d.status !== "fait") return gone();
-  const c = (await db.select({ name: schema.companies.name }).from(schema.companies).where(eq(schema.companies.id, d.companyId)).limit(1))[0];
+  const c = (await db.select({ name: schema.companies.name, sector: schema.companies.sector }).from(schema.companies).where(eq(schema.companies.id, d.companyId)).limit(1))[0];
   if (!c) return gone();
   const p = await getProfile();
-  const html = renderReport({ company: c.name, mailDomain: d.mailDomain, webHost: d.webHost, checkedOn: d.checkedOn, rulesVersion: d.rulesVersion, checks: parseChecks(d.findings), author: p.me, authorCompany: p.company, authorContact: [p.email, p.phone].filter(Boolean).join(" · "), cta: await reportCta(d.findings) });
+  const html = renderReport({ company: c.name, mailDomain: d.mailDomain, webHost: d.webHost, checkedOn: d.checkedOn, rulesVersion: d.rulesVersion, checks: parseChecks(d.findings), author: p.me, authorCompany: p.company, authorContact: [p.email, p.phone].filter(Boolean).join(" · "), cta: await reportCta(d.findings, c.sector) });
   try {
     await recordView(d.companyId, req);
   } catch (e) {

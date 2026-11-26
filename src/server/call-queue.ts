@@ -6,6 +6,7 @@ import { rankQueue, telHref, type QueueRow } from "@/lib/call-queue";
 import { REPLIED_REASON } from "@/lib/campaign";
 import { REPORT_VIEWED } from "@/lib/report-link";
 import { LEAD_EVENT } from "@/lib/lead";
+import { offerMenuForCompany, offersForCompany } from "@/lib/pack-quote";
 
 /** File d'appels du jour : tâches « appel » ouvertes dont l'échéance est arrivée, les plus chaudes d'abord. */
 export async function callQueue(t: string): Promise<QueueRow[]> {
@@ -13,7 +14,7 @@ export async function callQueue(t: string): Promise<QueueRow[]> {
   const ids = [...new Set(tasks.map((x) => x.companyId).filter((x): x is string => !!x))];
   if (!ids.length) return [];
   const [companies, contacts, views, replied, openings, tries, inbound] = await Promise.all([
-    db.select({ id: schema.companies.id, name: schema.companies.name }).from(schema.companies).where(inArray(schema.companies.id, ids)),
+    db.select({ id: schema.companies.id, name: schema.companies.name, sector: schema.companies.sector }).from(schema.companies).where(inArray(schema.companies.id, ids)),
     db.select().from(schema.contacts).where(inArray(schema.contacts.companyId, ids)),
     db.select({ companyId: schema.events.companyId, at: schema.events.createdAt }).from(schema.events).where(and(inArray(schema.events.companyId, ids), like(schema.events.text, `${REPORT_VIEWED}%`))),
     db.select({ companyId: schema.mailCampaignItems.companyId }).from(schema.mailCampaignItems).where(and(inArray(schema.mailCampaignItems.companyId, ids), eq(schema.mailCampaignItems.stopReason, REPLIED_REASON))),
@@ -22,6 +23,11 @@ export async function callQueue(t: string): Promise<QueueRow[]> {
     db.select({ companyId: schema.events.companyId }).from(schema.events).where(and(inArray(schema.events.companyId, ids), like(schema.events.text, `${LEAD_EVENT}%`), gte(schema.events.createdAt, new Date(Date.now() - 7 * 86_400_000)))),
   ]);
   const inboundSet = new Set(inbound.map((r) => r.companyId));
+  // Offre recommandée : secteur de la fiche et constats du dernier diagnostic (phase O).
+  const diags = await db.select({ companyId: schema.companyDiagnostics.companyId, findings: schema.companyDiagnostics.findings }).from(schema.companyDiagnostics).where(and(inArray(schema.companyDiagnostics.companyId, ids), eq(schema.companyDiagnostics.status, "fait"))).orderBy(desc(schema.companyDiagnostics.createdAt));
+  const lastFindings = new Map<string, string>();
+  for (const d of diags) if (!lastFindings.has(d.companyId)) lastFindings.set(d.companyId, d.findings);
+  const sectorOf = new Map(companies.map((c) => [c.id, c.sector]));
   const name = new Map(companies.map((c) => [c.id, c.name]));
   const iso = (d: Date) => new Intl.DateTimeFormat("fr-CA", { timeZone: "Europe/Paris" }).format(d);
   const viewed = new Map<string, string>();
@@ -53,6 +59,8 @@ export async function callQueue(t: string): Promise<QueueRow[]> {
         title: x.title,
         opening,
         attempts: tries.filter((c) => c.companyId === cid && c.at >= x.createdAt).length,
+        offers: offerMenuForCompany(sectorOf.get(cid) ?? "", lastFindings.get(cid) ?? "[]"),
+        recommended: offersForCompany(sectorOf.get(cid) ?? "", lastFindings.get(cid) ?? "[]").length > 0,
       };
     });
   return rankQueue(entries, t).map(({ viewedOn: _v, replied: _r, createdAt: _c, inbound: _i, ...row }) => row);

@@ -45,6 +45,8 @@ export const EXTRA_TEXT = {
   offrePilote: "Pour le point relevé sur {domaine}, la correction est un forfait : le Pack Courrier sécurisé, à {prix_pilote} pour les trois premiers clients, au lieu de {prix_public}.",
   offrePublic: "Pour le point relevé sur {domaine}, la correction est un forfait : le Pack Courrier sécurisé, à {prix_public}.",
   priseRdv: "Vous pouvez aussi choisir un créneau directement : {lien_cal}",
+  offreKit: "Pour aller plus loin contre les faux RIB, le Kit anti-faux-RIB y ajoute la double authentification sur vos messageries, une procédure écrite de vérification des changements de coordonnées bancaires et une heure de sensibilisation de votre équipe, à {prix_kit}.",
+  offreDossier: "Si un client ou votre assureur vous envoie un questionnaire de sécurité, le Dossier de preuves vous donne des réponses prêtes et justifiées, à {prix_dossier}.",
 } as const;
 
 /** Texte commun par segment : J0, J+3, J+7, J+14. */
@@ -99,6 +101,9 @@ export type DiagnosticMailInput = {
   /** prix du Pack Courrier, déjà formatés (« 290 € HT ») */
   prixPilote?: string;
   prixPublic?: string;
+  /** phase O : prix du Kit anti-faux-RIB (agences et cabinets) et du Dossier de preuves (éditeurs), déjà formatés ; absents = pas de phrase */
+  prixKit?: string;
+  prixDossier?: string;
 };
 export type DiagnosticMail = { ok: true; subject: string; body: string } | { ok: false; error: string };
 
@@ -128,7 +133,13 @@ export function buildDiagnosticMail(i: DiagnosticMailInput): DiagnosticMail {
     piste_corrective: text.fix,
     constat_secondaire: secondary ? SECONDARY_TEXT[secondary.variant] : "",
     synthese: reportUrl ? EXTRA_TEXT.syntheseLien : EXTRA_TEXT.syntheseSansLien,
-    offre_pack: text.family !== "A" ? "" : i.pilotOpen ? EXTRA_TEXT.offrePilote : EXTRA_TEXT.offrePublic,
+    // Phase O : le Pack (famille A), suivi de l'offre du segment quand son prix est fourni (Kit après le Pack pour les
+    // agences et cabinets, Dossier de preuves pour les éditeurs).
+    offre_pack: [
+      text.family !== "A" ? "" : i.pilotOpen ? EXTRA_TEXT.offrePilote : EXTRA_TEXT.offrePublic,
+      text.family === "A" && i.segment !== "editeurs" && i.prixKit ? EXTRA_TEXT.offreKit : "",
+      i.segment === "editeurs" && i.prixDossier ? EXTRA_TEXT.offreDossier : "",
+    ].filter(Boolean).join(" "),
     prise_rdv: calUrl ? EXTRA_TEXT.priseRdv : "",
   };
   const simple: Record<string, string> = {
@@ -141,6 +152,8 @@ export function buildDiagnosticMail(i: DiagnosticMailInput): DiagnosticMail {
     lien_cal: calUrl,
     prix_pilote: clean(i.prixPilote ?? "", 30),
     prix_public: clean(i.prixPublic ?? "", 30),
+    prix_kit: clean(i.prixKit ?? "", 60),
+    prix_dossier: clean(i.prixDossier ?? "", 60),
   };
   const missing = new Set<string>();
   // Seule exception au prénom obligatoire : une adresse générique publiée, sans dirigeant connu.

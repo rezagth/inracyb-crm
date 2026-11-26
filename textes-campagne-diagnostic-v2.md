@@ -62,7 +62,7 @@ Pas d'autre constat secondaire : un domaine proche enregistré ou une informatio
 
 ## Tableau 5 — synthèse, offre et rendez-vous (phase I, 25/11/2026)
 
-Champs composés : le moteur choisit la variante, jamais une phrase nouvelle. `{offre_pack}` ne concerne que la famille A (le Pack Courrier ne corrige pas un certificat) : vide pour la famille B. Le prix pilote s'affiche tant qu'il reste des places pilotes (devis acceptés).
+Champs composés : le moteur choisit la variante, jamais une phrase nouvelle. `{offre_pack}` ne concerne que la famille A (le Pack Courrier ne corrige pas un certificat) : vide pour la famille B. Le prix pilote s'affiche tant qu'il reste des places pilotes (devis acceptés). Phase O (26/11/2026) : après la phrase du Pack, le moteur ajoute la phrase de l'offre du segment (Kit anti-faux-RIB pour les segments 2 et 3, Dossier de preuves pour le segment 1). `{prix_kit}` vaut « 450 € HT pour les trois premiers clients » tant qu'il reste des places, sinon « 590 € HT » ; `{prix_dossier}` vaut « 690 € HT ».
 
 | Champ | Cas | Phrase |
 |---|---|---|
@@ -71,6 +71,8 @@ Champs composés : le moteur choisit la variante, jamais une phrase nouvelle. `{
 | `{offre_pack}` | famille A, places pilotes | Pour le point relevé sur {domaine}, la correction est un forfait : le Pack Courrier sécurisé, à {prix_pilote} pour les trois premiers clients, au lieu de {prix_public}. |
 | `{offre_pack}` | famille A, prix public | Pour le point relevé sur {domaine}, la correction est un forfait : le Pack Courrier sécurisé, à {prix_public}. |
 | `{prise_rdv}` | lien de réservation renseigné | Vous pouvez aussi choisir un créneau directement : {lien_cal} |
+| `{offre_pack}` (ajoutée après le Pack) | famille A, segments 2 et 3 (phase O) | Pour aller plus loin contre les faux RIB, le Kit anti-faux-RIB y ajoute la double authentification sur vos messageries, une procédure écrite de vérification des changements de coordonnées bancaires et une heure de sensibilisation de votre équipe, à {prix_kit}. |
+| `{offre_pack}` (ajoutée) | segment 1, familles A et B (phase O) | Si un client ou votre assureur vous envoie un questionnaire de sécurité, le Dossier de preuves vous donne des réponses prêtes et justifiées, à {prix_dossier}. |
 
 ## Règles
 
