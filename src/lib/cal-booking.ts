@@ -5,6 +5,7 @@
  * corps { triggerEvent, createdAt, payload: { uid, startTime, endTime, title, eventTitle, attendees[], responses{}, location, metadata } }.
  */
 import { createHmac, timingSafeEqual } from "node:crypto";
+import { PLACEHOLDER_DOMAIN } from "./contact-extract";
 
 export const CAL_TRIGGERS = ["BOOKING_CREATED", "BOOKING_RESCHEDULED", "BOOKING_CANCELLED"] as const;
 export type CalTrigger = (typeof CAL_TRIGGERS)[number];
@@ -45,9 +46,9 @@ const FREE_MAIL = /^(gmail|googlemail|hotmail|outlook|live|msn|yahoo|ymail|iclou
 /** Domaine de l'entreprise : le site déclaré d'abord, sinon celui de l'adresse si ce n'est pas une messagerie grand public. */
 export function bookingDomain(email: string, site: string): string {
   const fromSite = site.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/^www\./, "").split(/[/?#\s]/)[0];
-  if (/^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(fromSite)) return fromSite;
+  if (/^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(fromSite) && !PLACEHOLDER_DOMAIN.test(fromSite)) return fromSite;
   const d = email.split("@")[1]?.toLowerCase() ?? "";
-  return d && !FREE_MAIL.test(d) && /^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(d) ? d : "";
+  return d && !FREE_MAIL.test(d) && !PLACEHOLDER_DOMAIN.test(d) && /^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(d) ? d : "";
 }
 
 /** Instant ISO → jour et heure à Paris (« AAAA-MM-JJ », « HH:MM »). */

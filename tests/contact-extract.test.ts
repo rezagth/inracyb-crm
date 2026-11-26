@@ -49,3 +49,10 @@ test("site saisi dans les notes", () => {
   assert.equal(siteFromNotes("pas de site"), "");
   assert.equal(siteFromNotes("Site web : localhost"), "");
 });
+
+import { isJunkEmail as junk } from "../src/lib/contact-extract";
+
+test("adresses d'exemple des modèles de sites écartées", () => {
+  for (const e of ["contact@exemple.fr", "info@example.com", "hello@monentreprise.fr", "a@votre-domaine.fr", "x@domaine.fr", "y@test.fr"]) assert.equal(junk(e), true, e);
+  for (const e of ["contact@datakit.com", "info@exemplaire.fr", "accueil@cabinet-test-conseil.fr"]) assert.equal(junk(e), false, e);
+});

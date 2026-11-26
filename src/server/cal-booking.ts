@@ -31,7 +31,9 @@ async function companyFor(b: CalBooking): Promise<{ id: string; name: string; st
   if (!id && b.domain) {
     const byDomain = (await db.select({ companyId: schema.contacts.companyId }).from(schema.contacts).where(sql`lower(${schema.contacts.email}) like ${"%@" + b.domain}`).limit(1))[0];
     id = byDomain?.companyId;
-    if (!id) id = (await db.select({ id: schema.companies.id }).from(schema.companies).where(sql`lower(${schema.companies.notes}) like ${"%" + b.domain + "%"}`).limit(1))[0]?.id;
+    // Site exact dans les notes (« https://domaine.fr » ou « https://www.domaine.fr »), jamais une simple sous-chaîne.
+    const re = `://(www\\.)?${b.domain.replace(/[.\\]/g, "\\$&")}(/|\\s|$)`;
+    if (!id) id = (await db.select({ id: schema.companies.id }).from(schema.companies).where(sql`${schema.companies.notes} ~* ${re}`).limit(1))[0]?.id;
   }
   if (id) {
     const c = (await db.select().from(schema.companies).where(eq(schema.companies.id, id)).limit(1))[0];

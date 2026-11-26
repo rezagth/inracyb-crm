@@ -43,6 +43,10 @@ test("lecture : heure de Paris (hiver et été), domaine du site déclaré, mess
   assert.equal(bookingDomain("marie@gmail.com", ""), "");
   assert.equal(bookingDomain("marie@gmail.com", "https://www.agence.fr/contact"), "agence.fr");
   assert.equal(bookingDomain("marie@cabinet.fr", ""), "cabinet.fr");
+  // Domaines d'exemple : jamais utilisés pour reconnaître une entreprise (test du 26/11 rattaché à tort à une fiche).
+  assert.equal(bookingDomain("jean@gmail.com", "exemple.fr"), "");
+  assert.equal(bookingDomain("jean@exemple.fr", "https://www.monentreprise.fr"), "");
+  assert.equal(bookingDomain("jean@gmail.com", "example.com"), "");
   const b = parseCalBooking(body("BOOKING_CREATED"))!;
   assert.deepEqual([b.trigger, b.email, b.company, b.domain, b.topic, b.date, b.start, b.end, b.location], ["BOOKING_CREATED", "marie.durand@agence-exemple.fr", "Agence Exemple", "agence-exemple.fr", "Faux RIB", "2026-12-10", "10:30", "10:45", "https://app.cal.com/video/abc"]);
   assert.equal(parseCalBooking({ triggerEvent: "MEETING_ENDED", payload: {} }), null);
@@ -119,4 +123,14 @@ test("report puis annulation ; inconnu créé avec une messagerie grand public",
   assert.equal(c.source, "Réservation en ligne");
   assert.equal(c.stage, "rdv");
   assert.deepEqual(diagQueued, []); // pas de domaine d'entreprise : pas de diagnostic
+});
+
+test("fiche retrouvée par le site exact des notes, jamais par une sous-chaîne", async () => {
+  const { handleCalBooking } = await import("../src/server/cal-booking");
+  const decoy = (await db.insert(schema.companies).values({ name: "Leurre", notes: "Site web : https://mon-cabinet-dupont.fr" }).returning())[0];
+  const real = (await db.insert(schema.companies).values({ name: "Cabinet Dupont", notes: "Site web : https://www.cabinet-dupont.fr/" }).returning())[0];
+  await handleCalBooking(parseCalBooking(body("BOOKING_CREATED", { uid: "uidD4", attendees: [{ email: "paul@gmail.com", name: "Paul" }], responses: { entreprise: { value: "Dupont" }, site: { value: "cabinet-dupont.fr" } } }))!);
+  const m = (await db.select().from(schema.meetings)).find((x) => x.note.includes("uidD4"))!;
+  assert.equal(m.companyId, real.id);
+  assert.notEqual(m.companyId, decoy.id);
 });

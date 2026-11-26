@@ -6,6 +6,12 @@
 const GENERIC = new Set(["contact", "contacts", "info", "infos", "accueil", "secretariat", "secretariats", "cabinet", "direction", "bonjour", "hello", "commercial", "rdv", "admin", "office", "agence", "etude", "compta", "comptabilite", "reception", "standard", "mail", "email", "service", "services"]);
 const BAD_LOCAL = /^(no-?reply|donotreply|do-not-reply|postmaster|abuse|webmaster|privacy|dpo|rgpd|mailer-daemon|root|support-?noreply)$/i;
 const BAD_DOMAIN = /(sentry|wixpress|example\.|domain\.|yourdomain|email\.com|godaddy|schema\.org|w3\.org|googleapis|gstatic|cloudflare|jquery|bootstrap)/i;
+
+/**
+ * Domaines d'exemple laissés dans les modèles de sites et les formulaires (« contact@exemple.fr », « monentreprise.fr ») :
+ * jamais une vraie adresse, jamais un moyen de reconnaître une entreprise.
+ */
+export const PLACEHOLDER_DOMAIN = /^(?:www\.)?(?:ex[ae]mple|domaine?|votre-?(?:site|domaine|entreprise|societe)|mon-?(?:site|domaine|entreprise|societe)|nom-?de-?domaine|your-?(?:site|domain|company)|test|sample)\.[a-z.]{2,}$/i;
 const ASSET_TLD = /\.(png|jpe?g|gif|svg|webp|avif|ico|css|js|woff2?|ttf|eot|map|pdf)$/i;
 
 const dec = (s: string) => {
@@ -31,7 +37,7 @@ const EMAIL_RE = /[a-z0-9][a-z0-9._%+-]{0,63}@[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:
 export function isJunkEmail(e: string): boolean {
   const [local, domain] = e.split("@");
   if (!local || !domain || e.length > 80) return true;
-  return BAD_LOCAL.test(local) || BAD_DOMAIN.test(domain) || ASSET_TLD.test(e) || /^\d+x\d*$/.test(local);
+  return BAD_LOCAL.test(local) || BAD_DOMAIN.test(domain) || PLACEHOLDER_DOMAIN.test(domain) || ASSET_TLD.test(e) || /^\d+x\d*$/.test(local);
 }
 
 /** Adresses e-mail publiées dans la page (liens mailto: et texte), nettoyées et sans doublon. */
