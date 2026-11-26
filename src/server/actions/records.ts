@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { eq, sql } from "drizzle-orm";
 import { z } from "zod";
+import { visualJson } from "@/lib/post-visual";
 import { db, schema } from "@/db";
 import { requireUser } from "@/lib/auth";
 import { addDays, eur, parseEuroToCents, today } from "@/lib/format";
@@ -182,8 +183,11 @@ const H: Record<string, Handler> = {
     },
   },
   post: {
-    schema: z.object({ topic: req("Indique le sujet.", 300), date: reqDate, network: str(40), pillar: str(60), status: oneOf(F.POST_STATUS) }) as never,
-    save: async (v, id) => {
+    schema: z.object({ topic: req("Indique le sujet.", 300), date: reqDate, network: str(40), pillar: str(60), status: oneOf(F.POST_STATUS), body: str(5000), visualKicker: str(60), visualBig: str(40), visualSub: str(140) }) as never,
+    save: async (raw, id) => {
+      // Phase Q : les trois champs de l'image sont enregistrés ensemble, en JSON, dans posts.visual.
+      const { visualKicker, visualBig, visualSub, ...rest } = raw as Record<string, string>;
+      const v = { ...rest, visual: visualJson(visualKicker ?? "", visualBig ?? "", visualSub ?? "") };
       if (id) await db.update(schema.posts).set(v as never).where(eq(schema.posts.id, id));
       else id = (await db.insert(schema.posts).values(v as never).returning())[0].id;
       return { id, message: "Publication enregistrée" };

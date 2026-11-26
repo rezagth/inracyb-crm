@@ -248,3 +248,15 @@ psql "$PROD_URL" -X -v ON_ERROR_STOP=1 -f drizzle-manuel-phase-o.sql
 - **Recommandation** : agences et cabinets → Kit anti-faux-RIB ; éditeurs → Dossier de preuves ; Microsoft 365 → Microsoft 365 sécurisé ; constat SPF/DMARC → Pack. Affichée dans la file d'appels, le mail du matin et la synthèse `/r/…`.
 - **Devis en un clic** : bouton de l'offre recommandée + menu « Autre offre… » (file d'appels, fiche entreprise). Les nouvelles offres ajoutent la ligne d'abonnement à 149 € (à retirer si le client ne prend que le forfait). À l'acceptation, le contrat « Suivi Sécurité PME » est créé et suivi par le bilan mensuel ; la facture du devis ne reprend que le forfait.
 - **J+7** : après la phrase du Pack, phrase du Kit (agences, cabinets) ou du Dossier de preuves (éditeurs). Tableau 5 de `textes-campagne-diagnostic-v2.md`.
+
+## Phase Q : posts LinkedIn dans le CRM, mail du jour avec l'image
+
+**Migration, avant de déployer le code** (branche de sauvegarde Neon d'abord) : `drizzle-manuel-phase-q.sql` ajoute `posts.body` et `posts.visual`, puis les 8 posts de décembre (texte et image). Rejouable sans danger. Sans elle, la page Marketing plante.
+
+```bash
+psql "$PROD_URL" -X -v ON_ERROR_STOP=1 -f drizzle-manuel-phase-q.sql
+```
+
+- **Page Marketing** : carte « Posts à publier », avec le texte (bouton « Copier le texte »), l'aperçu de l'image (bouton « Télécharger l'image »), « Marquer comme publié » et « Modifier ». Le formulaire « Nouvelle publication » accepte le texte et les trois champs de l'image.
+- **Image** : générée par le CRM en 1200 × 1200 (`/api/posts/<id>/image`, connexion obligatoire) à partir de trois champs : surtitre, chiffre ou phrase forte, légende.
+- **Mail** (`/api/cron/linkedin`, mardi et jeudi à 6 h UTC, soit 7 h à Paris l'hiver) : s'il y a un post LinkedIn prévu ce jour-là et pas encore publié, le texte part par mail avec l'image en pièce jointe. Destinataire : `REPORT_TO_EMAIL`, sinon l'e-mail du profil.

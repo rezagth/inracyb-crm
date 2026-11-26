@@ -644,6 +644,10 @@ export const posts = pgTable("posts", {
   topic: text("topic").notNull(),
   pillar: text("pillar").notNull().default("Conseil pratique"),
   status: text("status").notNull().default("idee"),
+  /** Texte complet du post, prêt à copier (phase Q). */
+  body: text("body").notNull().default(""),
+  /** Image du post (phase Q), JSON { kicker, big, sub } : le CRM la génère en 1200 × 1200. "" = pas d'image. */
+  visual: text("visual").notNull().default(""),
   createdAt: createdAt(),
 });
 

@@ -10,6 +10,7 @@ import { composeCallDigest } from "@/lib/call-queue";
 import { callQueue } from "./call-queue";
 import { appUrl } from "./campaigns";
 
+
 export type WeeklyRun = { ok: boolean; sent: boolean; message: string };
 
 /** Destinataire : REPORT_TO_EMAIL, sinon l'adresse du profil du CRM. */
@@ -47,3 +48,4 @@ export async function sendCallDigest(): Promise<string> {
     return " · mail des appels non envoyé";
   }
 }
+

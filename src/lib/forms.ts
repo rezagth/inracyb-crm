@@ -175,13 +175,17 @@ export const FORMS: Record<string, FormDef> = {
   },
   post: {
     title: "Nouvelle publication",
-    defaults: () => ({ topic: "", date: addDays(today(), 3), network: "LinkedIn", pillar: "Conseil pratique", status: "idee" }),
+    defaults: () => ({ topic: "", date: addDays(today(), 3), network: "LinkedIn", pillar: "Conseil pratique", status: "idee", body: "", visualKicker: "", visualBig: "", visualSub: "" }),
     fields: [
       { k: "topic", l: "Sujet *", kind: "text", full: true, required: true },
       { k: "date", l: "Date prévue", kind: "date" },
       { k: "network", l: "Réseau", kind: "select", opts: o("LinkedIn", "Instagram", "TikTok", "YouTube") },
       { k: "pillar", l: "Pilier", kind: "select", opts: o("Conseil pratique", "Expertise", "Offre", "Coulisses") },
       { k: "status", l: "Statut", kind: "select", opts: POST_STATUS },
+      { k: "body", l: "Texte du post", kind: "area" },
+      { k: "visualKicker", l: "Image : surtitre", kind: "text" },
+      { k: "visualBig", l: "Image : chiffre ou phrase forte", kind: "text" },
+      { k: "visualSub", l: "Image : légende", kind: "text", full: true },
     ],
   },
   obligation: {
