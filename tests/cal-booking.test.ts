@@ -7,7 +7,7 @@ import { drizzle } from "drizzle-orm/pglite";
 import { migrate } from "drizzle-orm/pglite/migrator";
 import { eq } from "drizzle-orm";
 import * as schema from "../src/db/schema";
-import { bookingDomain, parisSlot, parseCalBooking, verifyCalSignature } from "../src/lib/cal-booking";
+import { bookingDomain, cleanPhone, parisSlot, parseCalBooking, verifyCalSignature } from "../src/lib/cal-booking";
 
 const SECRET = "secret-de-test-cal-0123456789";
 const body = (trigger: string, o: Record<string, unknown> = {}) => ({
@@ -46,6 +46,10 @@ test("lecture : heure de Paris (hiver et été), domaine du site déclaré, mess
   const b = parseCalBooking(body("BOOKING_CREATED"))!;
   assert.deepEqual([b.trigger, b.email, b.company, b.domain, b.topic, b.date, b.start, b.end, b.location], ["BOOKING_CREATED", "marie.durand@agence-exemple.fr", "Agence Exemple", "agence-exemple.fr", "Faux RIB", "2026-12-10", "10:30", "10:45", "https://app.cal.com/video/abc"]);
   assert.equal(parseCalBooking({ triggerEvent: "MEETING_ENDED", payload: {} }), null);
+  assert.equal(b.phone, "");
+  assert.equal(parseCalBooking(body("BOOKING_CREATED", { responses: { attendeePhoneNumber: { value: "+33 6 12 34 56 78" } } }))!.phone, "+33 6 12 34 56 78");
+  assert.equal(cleanPhone("12"), "");
+  assert.equal(cleanPhone("06 12 34 56 78<script>"), "06 12 34 56 78");
   assert.equal(parseCalBooking(body("BOOKING_CREATED", { attendees: [{ email: "pas-une-adresse" }] })), null);
 });
 

@@ -68,6 +68,8 @@ export type CalBooking = {
   end: string;
   name: string;
   email: string;
+  /** téléphone saisi (question « Numéro de téléphone » de Cal, facultative) ; "" sinon */
+  phone: string;
   company: string;
   domain: string;
   topic: string;
@@ -103,6 +105,7 @@ export function parseCalBooking(body: unknown): CalBooking | null {
     end: end.date === start.date ? end.time : "23:59",
     name: str(attendee?.name, 120) || answer(p.responses, "name"),
     email,
+    phone: cleanPhone(answer(p.responses, "attendeePhoneNumber") || str(attendee?.phoneNumber, 40)),
     company: answer(p.responses, CAL_QUESTIONS.company).slice(0, 120),
     domain: bookingDomain(email, site),
     topic: answer(p.responses, CAL_QUESTIONS.topic).slice(0, 120),
@@ -110,6 +113,13 @@ export function parseCalBooking(body: unknown): CalBooking | null {
     eventTitle: str(p.eventTitle, 120) || str(p.type, 120) || "Rendez-vous",
     location,
   };
+}
+
+/** Téléphone utilisable (9 à 15 chiffres, « + » initial admis), sinon "". */
+export function cleanPhone(raw: string): string {
+  const v = raw.replace(/[^\d+ .()-]/g, "").trim().slice(0, 30);
+  const digits = v.replace(/\D/g, "");
+  return digits.length >= 9 && digits.length <= 15 ? v : "";
 }
 
 /** Prénom et nom à partir du nom saisi dans Cal. */

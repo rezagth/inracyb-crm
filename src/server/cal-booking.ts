@@ -24,7 +24,9 @@ async function meetingOf(uid: string) {
 
 /** Fiche de l'entreprise : par l'adresse du contact, sinon par le domaine (adresses ou site), sinon créée. */
 async function companyFor(b: CalBooking): Promise<{ id: string; name: string; stage: string; sector: string; created: boolean }> {
-  const byMail = (await db.select({ companyId: schema.contacts.companyId }).from(schema.contacts).where(sql`lower(${schema.contacts.email}) = ${b.email}`).limit(1))[0];
+  const byMail = (await db.select({ companyId: schema.contacts.companyId, id: schema.contacts.id, phone: schema.contacts.phone }).from(schema.contacts).where(sql`lower(${schema.contacts.email}) = ${b.email}`).limit(1))[0];
+  // Téléphone saisi dans Cal : ajouté au contact s'il n'en avait pas (jamais remplacé).
+  if (byMail && b.phone && !byMail.phone.trim()) await db.update(schema.contacts).set({ phone: b.phone }).where(eq(schema.contacts.id, byMail.id));
   let id = byMail?.companyId;
   if (!id && b.domain) {
     const byDomain = (await db.select({ companyId: schema.contacts.companyId }).from(schema.contacts).where(sql`lower(${schema.contacts.email}) like ${"%@" + b.domain}`).limit(1))[0];
@@ -36,7 +38,7 @@ async function companyFor(b: CalBooking): Promise<{ id: string; name: string; st
     if (c) {
       if (!byMail) {
         const { firstName, lastName } = splitName(b.name);
-        await db.insert(schema.contacts).values({ companyId: c.id, firstName: firstName || "Contact", lastName, email: b.email, emailSource: "formulaire", isPrimary: false });
+        await db.insert(schema.contacts).values({ companyId: c.id, firstName: firstName || "Contact", lastName, email: b.email, emailSource: "formulaire", phone: b.phone, isPrimary: false });
       }
       return { id: c.id, name: c.name, stage: c.stage, sector: c.sector, created: false };
     }
@@ -44,7 +46,7 @@ async function companyFor(b: CalBooking): Promise<{ id: string; name: string; st
   const name = b.company || b.domain || b.name || b.email;
   const c = (await db.insert(schema.companies).values({ name, source: "Réservation en ligne", stage: "rdv", priority: "haute", notes: b.domain ? `Site web : https://${b.domain}` : "" }).returning())[0];
   const { firstName, lastName } = splitName(b.name);
-  await db.insert(schema.contacts).values({ companyId: c.id, firstName: firstName || "Contact", lastName, email: b.email, emailSource: "formulaire", isPrimary: true });
+  await db.insert(schema.contacts).values({ companyId: c.id, firstName: firstName || "Contact", lastName, email: b.email, emailSource: "formulaire", phone: b.phone, isPrimary: true });
   await logEvent(db, c.id, "create", `Entreprise créée par une réservation en ligne (Cal.com) : ${b.name || b.email}`);
   return { id: c.id, name: c.name, stage: "rdv", sector: c.sector, created: true };
 }
@@ -104,7 +106,7 @@ export async function handleCalBooking(b: CalBooking): Promise<CalResult> {
 
   const c = await companyFor(b);
   const title = `${b.eventTitle} — ${c.name}`.slice(0, 200);
-  const note = [mark(b.uid), `Réservé par ${b.name || "?"} (${b.email})`, b.topic && `Sujet : ${b.topic}`, b.domain && `Domaine : ${b.domain}`, b.notes && `Message : ${b.notes}`].filter(Boolean).join("\n");
+  const note = [mark(b.uid), `Réservé par ${b.name || "?"} (${b.email}${b.phone ? `, ${b.phone}` : ""})`, b.topic && `Sujet : ${b.topic}`, b.domain && `Domaine : ${b.domain}`, b.notes && `Message : ${b.notes}`].filter(Boolean).join("\n");
   await db.transaction(async (tx) => {
     await tx.insert(schema.meetings).values({ companyId: c.id, title, date: b.date, start: b.start, end: b.end, mode: "Visio", location: b.location.slice(0, 300), note });
     await tx.update(schema.mailCampaignItems).set({ status: "arrete", stopReason: BOOKED_REASON }).where(and(eq(schema.mailCampaignItems.companyId, c.id), eq(schema.mailCampaignItems.status, "en_cours")));
@@ -130,7 +132,7 @@ export async function handleCalBooking(b: CalBooking): Promise<CalResult> {
   }
   const prep = await prepNotes(c.id, c.sector);
   await notifyOwner(`Nouveau RDV : ${c.name} — ${when(b)}`, [
-    `${b.name || "Un prospect"} (${b.email}) a réservé « ${b.eventTitle} » le ${when(b)}.`,
+    `${b.name || "Un prospect"} (${b.email}${b.phone ? `, ${b.phone}` : ""}) a réservé « ${b.eventTitle} » le ${when(b)}.`,
     [b.topic && `Sujet choisi : ${b.topic}`, b.domain && `Domaine : ${b.domain}`, b.notes && `Message : ${b.notes}`, b.location && `Lien : ${b.location}`].filter(Boolean).join("\n"),
     `Constat sur le domaine : ${prep.finding}`,
     prep.offer ? `Offre à proposer : ${prep.offer}. Le devis se crée en un clic depuis la fiche.` : "",
