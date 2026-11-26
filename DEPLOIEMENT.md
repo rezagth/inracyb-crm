@@ -294,3 +294,13 @@ psql "$PROD_URL" -X -v ON_ERROR_STOP=1 -f drizzle-manuel-phase-s.sql
 - **Republication de secours** (CRM, `/api/cron/linkedin`) : un jour ouvré sans post et sans aucun post programmé à venir, un ancien post publié il y a plus de 90 jours (et dont le sujet n'a pas été repris) est republié, avec une note dans le mail.
 - La tâche ne tourne que lorsque l'app Claude est ouverte (sinon au lancement suivant) : avec 10 posts d'avance, il faut deux semaines d'app fermée pour épuiser le stock.
 - Les chiffres de Cybermalveillance.gouv.fr (`CYBER_FACTS`) sont ceux du rapport 2024 : à mettre à jour à la publication du rapport suivant.
+
+## Phase U : réservations Cal.com reliées au CRM
+
+**Aucune migration.** Textes et réglages de la page Cal.com : `data/cal-com-reglages.md`.
+
+- **Webhook** `/api/webhooks/cal` (public, fermé sans `CAL_WEBHOOK_SECRET`) : chaque envoi doit porter `X-Cal-Signature-256` (HMAC-SHA256 hexadécimal du corps brut). Événements suivis : Booking Created, Booking Rescheduled, Booking Cancelled ; les autres et le ping de test sont acceptés sans effet.
+- **Création** : fiche retrouvée par l'adresse, puis par le domaine (adresses des contacts, site des notes), sinon créée (source « Réservation en ligne », étape « RDV planifié ») ; rendez-vous dans l'agenda (heure de Paris, lien de visio, repère « Réservation Cal <uid> ») ; relances de campagne arrêtées (« A pris rendez-vous ») ; appels ouverts fermés ; étape « RDV planifié » ; tâche « Préparer le rendez-vous » la veille ; diagnostic du domaine s'il n'y en a pas de moins de 14 jours ; mail au propriétaire avec le constat et l'offre recommandée. Une même réservation n'est jamais créée deux fois.
+- **Report** : rendez-vous et tâche de préparation déplacés. **Annulation** : rendez-vous retiré, tâche « Relancer » dans 2 jours ouvrés, mail.
+- Questions Cal.com lues par le CRM (champ Identifier) : `entreprise`, `site`, `sujet`. Une adresse Gmail, Outlook, etc. ne sert pas à reconnaître l'entreprise : la question `site` y supplée.
+- **CRM** : renseigner le lien du rendez-vous dans Intégrations (sinon il manque dans J+7, la synthèse et les brouillons de réponse).
