@@ -32,6 +32,7 @@ export default async function AlimentationPage() {
         placesUsedToday={o.placesUsedToday}
         today={o.today}
         stock={o.stock}
+        segments={o.segments.map((x) => ({ label: SEGMENT_LABEL[x.segment], today: x.today, week: x.week }))}
         items={[
           ...items.map(({ item, company }) => ({ id: item.id, companyId: item.companyId, company, segment: isSegment(item.segment) ? SEGMENT_LABEL[item.segment] : item.segment, stage: FEED_STAGE_LABEL[item.stage as FeedStage] ?? item.stage, stageKey: item.stage, reason: item.reason, service: item.service, movedOn: item.movedOn })),
           ...skipped.map((k) => ({ id: "skip-" + k.siren, companyId: "", company: k.name, segment: isSegment(k.segment) ? SEGMENT_LABEL[k.segment] : k.segment, stage: "Écartée, hors CRM", stageKey: "ecarte", reason: k.reason, service: "", movedOn: k.skippedOn })),

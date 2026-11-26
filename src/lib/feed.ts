@@ -103,3 +103,26 @@ export function missingCoordinates(email: string, phone: string): string {
   if (!mail && !tel) return REJECT.noEmailNoPhone;
   return mail ? REJECT.noPhone : REJECT.noEmail;
 }
+
+/** Passages de l'alimentation par jour ouvré (phase N) : 5 h, puis vers 9 h, 11 h, 13 h et 15 h (UTC). */
+export const FEED_PASSES = 5;
+
+/** Numéro de passage lu dans l'adresse du déclenchement (« ?passe=3 ») : 1 par défaut, borné à FEED_PASSES. */
+export function passOf(raw: string | null | undefined): number {
+  const n = Number(raw);
+  return Number.isInteger(n) && n >= 1 && n <= FEED_PASSES ? n : 1;
+}
+
+/**
+ * Ordre de recherche des segments pour un passage (phase N) : le premier segment a tout le temps disponible,
+ * il change à chaque passage pour qu'aucun segment (l'immobilier, par exemple) ne soit jamais servi en dernier tous les jours.
+ */
+export function segmentOrder<T>(segments: readonly T[], pass: number): T[] {
+  const n = segments.length;
+  if (!n) return [];
+  const k = (((pass - 1) % n) + n) % n;
+  return [...segments.slice(k), ...segments.slice(0, k)];
+}
+
+/** Temps donné au diagnostic du stock avant une recherche : borné pour que la recherche de nouvelles entreprises garde sa part. */
+export const STOCK_BEFORE_SEARCH_MS = 12_000;

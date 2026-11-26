@@ -6,7 +6,7 @@ import { greetsWithoutName, hostOf, pickPublishedEmail, siteFromNotes } from "@/
 import { DIAGNOSTIC_FRESH_DAYS, RULES_VERSION, usableDiagnostic, type Probe } from "@/lib/diagnostic";
 import { SEGMENTS, isSegment, segmentOfSector, type Segment } from "@/lib/diagnostic-mails";
 import { siteCandidates } from "@/lib/site-guess";
-import { enrolSlots, FEED_DEFAULTS, isPhone, MAILS_PER_PROSPECT, PRESCRIBER_MAILS, missingCoordinates, nextCursor, parseDepartements, permanentName, readCursors, REJECT, searchPlan, type Cursor } from "@/lib/feed";
+import { enrolSlots, FEED_DEFAULTS, segmentOrder, STOCK_BEFORE_SEARCH_MS, isPhone, MAILS_PER_PROSPECT, PRESCRIBER_MAILS, missingCoordinates, nextCursor, parseDepartements, permanentName, readCursors, REJECT, searchPlan, type Cursor } from "@/lib/feed";
 import { addDays, today } from "@/lib/format";
 import { EFFECTIF_CODES, type SearchInput } from "@/lib/prospect-search";
 import { checkServicePauses, crossHistories, getDailyState, optoutSet, reservedSectors, restDays } from "./campaigns";
@@ -47,7 +47,7 @@ type Verified = { kind: "ok"; email: string; phone: string; site: string } | { k
  * s'arrête quand le temps imparti est presque écoulé ; le reste est repris au passage suivant. Rien ne se passe tant que
  * l'interrupteur global est sur « arrêt ».
  */
-export async function runFeed(opts: { source?: "cron" | "manuel"; budgetMs?: number; deps?: Partial<FeedDeps>; /** seulement diagnostiquer et inscrire le stock déjà vérifié (tâche de 6 h 30), sans chercher */ stockOnly?: boolean } = {}): Promise<FeedSummary> {
+export async function runFeed(opts: { source?: "cron" | "manuel"; budgetMs?: number; /** numéro du passage du jour (1 à 5) : fait tourner l'ordre des segments */ pass?: number; deps?: Partial<FeedDeps>; /** seulement diagnostiquer et inscrire le stock déjà vérifié (tâche de 6 h 30), sans chercher */ stockOnly?: boolean } = {}): Promise<FeedSummary> {
   const started = Date.now();
   const budget = opts.budgetMs ?? 50_000;
   const left = () => budget - (Date.now() - started);
@@ -77,7 +77,8 @@ export async function runFeed(opts: { source?: "cron" | "manuel"; budgetMs?: num
     sum.ran = true;
     // Le stock déjà vérifié passe en premier : la recherche de nouvelles entreprises ne doit jamais affamer le diagnostic.
     await enrol();
-    if (s.feedDiagnostic && left() > 14_000) await diagnoseReady();
+    // Avant une recherche, le diagnostic du stock est borné : la tâche de 6 h 30 et les passages suivants finissent le reste.
+    if (s.feedDiagnostic && left() > 14_000) await diagnoseReady(opts.stockOnly ? Infinity : STOCK_BEFORE_SEARCH_MS);
     if (left() > 3_000) await enrol();
     if (!opts.stockOnly) {
       if (left() > 15_000) await recheckLegacy();
@@ -100,7 +101,7 @@ export async function runFeed(opts: { source?: "cron" | "manuel"; budgetMs?: num
   else if (deps.place && placesUsed >= placesMax) notes.push(`Quota Google Places du jour atteint (${placesMax})`);
   if (bySiren) notes.push(`${bySiren} site(s) trouvé(s) sans Google, prouvé(s) par le SIREN`);
   if (!deps.place) notes.push("Google Places non configuré : seuls les sites prouvés par le SIREN sont retenus");
-  sum.message = [...(opts.stockOnly ? ["Stock"] : []), `${sum.found} trouvée(s)`, `${sum.imported} intégrée(s) avec mail et téléphone`, `${sum.diagnosed} diagnostiquée(s)`, `${sum.enrolled} inscrite(s)`, `${sum.rejected} écartée(s)`, ...notes].join(" · ");
+  sum.message = [...(opts.stockOnly ? ["Stock"] : []), ...((opts.pass ?? 1) > 1 ? [`Passage ${opts.pass}`] : []), `${sum.found} trouvée(s)`, `${sum.imported} intégrée(s) avec mail et téléphone`, `${sum.diagnosed} diagnostiquée(s)`, `${sum.enrolled} inscrite(s)`, `${sum.rejected} écartée(s)`, ...notes].join(" · ");
   try {
     await db.insert(schema.feedRuns).values({ source: opts.source ?? "cron", ok: sum.ok, found: sum.found, imported: sum.imported, completed: sum.completed, diagnosed: sum.diagnosed, enrolled: sum.enrolled, rejected: sum.rejected, message: sum.message.slice(0, 800) });
   } catch (e) {
@@ -178,7 +179,8 @@ export async function runFeed(opts: { source?: "cron" | "manuel"; budgetMs?: num
     const perDay = Math.max(0, Math.min(s.importPerSegment, 200));
     let dup = 0, blocked = 0;
 
-    for (const [k, segment] of SEGMENTS.entries()) {
+    const order = segmentOrder(SEGMENTS, opts.pass ?? 1);
+    for (const [k, segment] of order.entries()) {
       // Cabinets réservés aux prescripteurs : cherchés seulement quand l'alimentation des prescripteurs est en marche.
       const plan = searchPlan(segment, departements, s.feedPrescripteur ? [] : reservedSectors());
       if (!plan.length) continue;
@@ -187,7 +189,7 @@ export async function runFeed(opts: { source?: "cron" | "manuel"; budgetMs?: num
       // Deux limites : les entreprises intégrées du jour, et un stock en cours de traitement qui ne dépasse pas deux jours d'intégration.
       let quota = Math.min(perDay - mine.filter((i) => i.importedOn === t).length, 2 * perDay - stock);
       // Le quota Google du jour est partagé équitablement entre les segments qui restent à traiter.
-      const placesCap = placesUsed + Math.ceil(Math.max(0, placesMax - placesUsed) / (SEGMENTS.length - k));
+      const placesCap = placesUsed + Math.ceil(Math.max(0, placesMax - placesUsed) / (order.length - k));
       let cur: Cursor = cursors[segment] && cursors[segment]!.combo < plan.length ? cursors[segment]! : { combo: 0, page: 1 };
       // Au plus 8 pages de l'Annuaire par segment et par passage : assez pour avancer, sans solliciter l'API à l'excès.
       for (let pages = 0; quota > 0 && pages < 8 && left() > 15_000; pages++) {
@@ -305,7 +307,7 @@ export async function runFeed(opts: { source?: "cron" | "manuel"; budgetMs?: num
   }
 
   /** Diagnostic passif des entreprises complétées, par le moteur existant et sa file d'attente. */
-  async function diagnoseReady() {
+  async function diagnoseReady(capMs = Infinity) {
     const items = await db.select().from(schema.feedItems).where(eq(schema.feedItems.stage, "a_diagnostiquer")).orderBy(asc(schema.feedItems.createdAt)).limit(30);
     if (!items.length) return;
     const ids = items.map((i) => i.companyId);
@@ -317,7 +319,7 @@ export async function runFeed(opts: { source?: "cron" | "manuel"; budgetMs?: num
     };
     const before = await lastOf();
     await queueDiagnostics(ids.filter((id) => !(before.get(id)?.status === "fait" && before.get(id)?.checkedOn === t)));
-    await runDiagnostics({ budgetMs: Math.max(1, Math.min(left() - 4_000, 25_000)), probe: deps.probe, batch: 6 });
+    await runDiagnostics({ budgetMs: Math.max(1, Math.min(left() - 4_000, 25_000, capMs)), probe: deps.probe, batch: 6 });
     const after = await lastOf();
     for (const it of items) {
       const d = after.get(it.companyId);
@@ -458,12 +460,17 @@ export async function feedOverview(t = today()) {
   const day = await db.select({ stage: schema.feedItems.stage, n: sql<number>`count(*)` }).from(schema.feedItems).where(eq(schema.feedItems.movedOn, t)).groupBy(schema.feedItems.stage);
   const importedToday = Number((await db.select({ n: sql<number>`count(*)` }).from(schema.feedItems).where(eq(schema.feedItems.importedOn, t)))[0]?.n ?? 0);
   const count = (rows: { stage: string; n: number }[], k: string) => Number(rows.find((r) => r.stage === k)?.n ?? 0);
+  // Intégrations par segment : aujourd'hui et sur 7 jours (montre si chaque segment avance, l'immobilier compris).
+  const since = addDays(t, -6);
+  const bySeg = await db.select({ segment: schema.feedItems.segment, importedOn: schema.feedItems.importedOn }).from(schema.feedItems).where(sql`${schema.feedItems.importedOn} >= ${since}`);
+  const segments = SEGMENTS.map((k) => ({ segment: k, today: bySeg.filter((r) => r.segment === k && r.importedOn === t).length, week: bySeg.filter((r) => r.segment === k).length }));
   const skippedAll = Number((await db.select({ n: sql<number>`count(*)` }).from(schema.feedSkipped))[0]?.n ?? 0);
   const skippedToday = Number((await db.select({ n: sql<number>`count(*)` }).from(schema.feedSkipped).where(eq(schema.feedSkipped.skippedOn, t)))[0]?.n ?? 0);
   return {
     settings: s,
     placesReady: placesReady(),
     placesUsedToday: s.placesDay === t ? s.placesUsed : 0,
+    segments,
     today: { imported: importedToday, enrolled: count(day, "inscrit"), rejected: count(day, "ecarte") + skippedToday },
     stock: { toComplete: count(stages, "a_completer"), toDiagnose: count(stages, "a_diagnostiquer"), ready: count(stages, "a_inscrire"), enrolled: count(stages, "inscrit"), rejected: count(stages, "ecarte") + skippedAll },
   };

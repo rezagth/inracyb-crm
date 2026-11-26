@@ -15,7 +15,7 @@ type Result = { ok: true; message: string } | { ok: false; error: string };
 
 const FILTERS: [string, string][] = [["", "Tout"], ["a_completer", "À compléter"], ["a_diagnostiquer", "À diagnostiquer"], ["a_inscrire", "Prêtes"], ["inscrit", "Inscrites"], ["ecarte", "Écartées"]];
 
-export function Alimentation({ settings, sizes, placesReady, placesUsedToday, today, stock, items, runs }: { settings: Settings; sizes: { code: string; label: string }[]; placesReady: boolean; placesUsedToday: number; today: { imported: number; enrolled: number; rejected: number }; stock: { toComplete: number; toDiagnose: number; ready: number; enrolled: number; rejected: number }; items: Item[]; runs: Run[] }) {
+export function Alimentation({ settings, sizes, placesReady, placesUsedToday, today, stock, segments, items, runs }: { settings: Settings; sizes: { code: string; label: string }[]; placesReady: boolean; placesUsedToday: number; today: { imported: number; enrolled: number; rejected: number }; stock: { toComplete: number; toDiagnose: number; ready: number; enrolled: number; rejected: number }; segments: { label: string; today: number; week: number }[]; items: Item[]; runs: Run[] }) {
   const router = useRouter();
   const toast = useToast();
   const [pending, start] = useTransition();
@@ -52,13 +52,16 @@ export function Alimentation({ settings, sizes, placesReady, placesUsedToday, to
       >
         <div className="flex flex-col gap-2 p-5 text-[13px]">
           <p className={settings.enabled ? "text-muted-fg" : "tip"}>
-            {settings.enabled ? "Passage automatique chaque jour ouvré, avant les diagnostics et les envois. L'arrêt est immédiat : plus aucune recherche, aucun import, aucune inscription. Les séquences déjà commencées continuent ; pour les arrêter aussi, mets la campagne en pause dans Campagnes." : "Rien n'est cherché, importé ni inscrit tant que l'alimentation n'est pas mise en marche."}
+            {settings.enabled ? "Cinq passages automatiques chaque jour ouvré (5 h, puis vers 9 h, 11 h, 13 h et 15 h, heure UTC), chacun commençant par un segment différent ; les quotas du jour sont communs à tous les passages. L'arrêt est immédiat : plus aucune recherche, aucun import, aucune inscription. Les séquences déjà commencées continuent ; pour les arrêter aussi, mets la campagne en pause dans Campagnes." : "Rien n'est cherché, importé ni inscrit tant que l'alimentation n'est pas mise en marche."}
           </p>
           <p className="text-muted-fg">
             Aujourd&apos;hui : {today.imported} intégrée(s) avec mail et téléphone · {today.enrolled} inscrite(s) · {today.rejected} écartée(s) · Google Places : {placesReady ? `${placesUsedToday}/${settings.placesDaily} requête(s)` : "non configuré : aucune entreprise ne peut être vérifiée, donc aucune n'est intégrée"}
           </p>
           <p className="text-muted-fg">
             En cours : {stock.toComplete} à compléter · {stock.toDiagnose} à diagnostiquer · {stock.ready} prête(s), en attente de place · Total : {stock.enrolled} inscrite(s), {stock.rejected} écartée(s)
+          </p>
+          <p className="text-muted-fg">
+            Intégrées par segment (aujourd&apos;hui / 7 jours) : {segments.map((x) => `${x.label} ${x.today} / ${x.week}`).join(" · ")}
           </p>
         </div>
       </Card>

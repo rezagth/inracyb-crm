@@ -225,3 +225,12 @@ psql "$PROD_URL" -X -v ON_ERROR_STOP=1 -f drizzle-manuel-phase-m.sql
 - **Mail des appels du jour** : après les envois de 8 h, le CRM t'envoie la file d'appels (numéros, constats, essais). Rien si la file est vide. Destinataire : `REPORT_TO_EMAIL`, sinon l'e-mail du profil.
 - **Bilan mensuel** (`/api/cron/suivi`, jours ouvrés à 6 h 45 UTC) : à partir du mois qui suit la signature, nouvelle mesure du domaine, mail au contact principal (étiquettes `facturation` et `suivi`, expéditeur de facturation), tâche prioritaire si un écart apparaît. Sans Brevo ou sans e-mail : tâche « envoyer à la main », texte dans le journal.
 - **Bascule Audit → Diagnostic** (bouton en haut de la page Campagnes, visible s'il y a quelque chose à basculer) : arrête les séquences Audit des cabinets réservés aux prescripteurs et des entreprises que le Diagnostic attend. L'alimentation les inscrit ensuite, après le délai de repos habituel.
+
+## Phase N : cinq passages d'alimentation par jour
+
+**Aucune migration.** `vercel.json` ajoute 4 déclenchements de `/api/cron/alimentation?passe=2` à `?passe=5` (9 h, 11 h, 13 h, 15 h UTC, jours ouvrés). Après le déploiement, vérifier dans Vercel > Settings > Cron Jobs que les 10 déclenchements apparaissent (sur l'offre Hobby, chaque déclenchement part à un moment quelconque de l'heure prévue).
+
+- **Rotation** : chaque passage commence par un segment différent (passage 1 : Éditeurs, 2 : Cabinets, 3 : Immobilier, 4 : Éditeurs, 5 : Cabinets). Le temps restant passe au segment suivant.
+- **Quotas communs** : imports par segment et par jour (`importPerSegment`) et requêtes Google Places du jour (`placesDaily`) valent pour l'ensemble des passages.
+- **Stock borné** : avant une recherche, le diagnostic du stock dispose de 12 secondes au plus ; la tâche de 6 h 30 et les passages suivants finissent le reste.
+- **Page Alimentation** : nouvelle ligne « Intégrées par segment (aujourd'hui / 7 jours) ».

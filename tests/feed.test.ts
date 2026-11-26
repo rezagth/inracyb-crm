@@ -12,7 +12,7 @@ import { eq } from "drizzle-orm";
 import * as schema from "../src/db/schema";
 import { isGenericEmail, pickPublishedEmail } from "../src/lib/contact-extract";
 import type { Dns, Probe } from "../src/lib/diagnostic";
-import { enrolSlots, isPhone, missingCoordinates, nextCursor, parseDepartements, permanentName, readCursors, REJECT, searchPlan } from "../src/lib/feed";
+import { enrolSlots, FEED_PASSES, passOf, segmentOrder, isPhone, missingCoordinates, nextCursor, parseDepartements, permanentName, readCursors, REJECT, searchPlan } from "../src/lib/feed";
 import type { SearchInput } from "../src/lib/prospect-search";
 import type { FeedDeps } from "../src/server/feed";
 import type { Found } from "../src/server/prospect-search";
@@ -502,4 +502,35 @@ test("alimentation des prescripteurs (interrupteur) : les cabinets réservés so
   clearSearch();
   await run();
   assert.ok(!world.searches.some((x) => ["Expertise comptable", "Juridique", "Notariat"].includes(x.sector)));
+});
+
+test("passages du jour : numéro borné, ordre des segments qui tourne", () => {
+  assert.equal(passOf(null), 1);
+  assert.equal(passOf("3"), 3);
+  assert.equal(passOf("0"), 1);
+  assert.equal(passOf(String(FEED_PASSES + 1)), 1);
+  assert.equal(passOf("2.5"), 1);
+  const segs = ["editeurs", "cabinets", "immobilier"] as const;
+  assert.deepEqual(segmentOrder(segs, 1), ["editeurs", "cabinets", "immobilier"]);
+  assert.deepEqual(segmentOrder(segs, 3), ["immobilier", "editeurs", "cabinets"]);
+  assert.deepEqual(segmentOrder(segs, 4), ["editeurs", "cabinets", "immobilier"]);
+  assert.deepEqual(segmentOrder([], 2), []);
+});
+
+test("passage 3 : l'immobilier est cherché en premier ; le quota du jour reste commun à tous les passages", async () => {
+  await db.delete(schema.feedItems);
+  clearSearch();
+  await settings({ importPerSegment: 1, cursors: "{}" });
+  world.pages["Immobilier||1"] = [found("Agence Une", "Immobilier"), found("Agence Deux", "Immobilier")];
+  site("Agence Une", "agence-une.fr", ["contact@agence-une.fr"]);
+  site("Agence Deux", "agence-deux.fr", ["contact@agence-deux.fr"]);
+  const feed = await import("../src/server/feed");
+  const r = await feed.runFeed({ deps, pass: 3 });
+  assert.equal(world.searches[0].sector, "Immobilier");
+  assert.equal(r.imported, 1);
+  assert.match(r.message, /^Passage 3 · /);
+  const again = await feed.runFeed({ deps, pass: 4 });
+  assert.equal(again.imported, 0); // même jour : le quota du segment est déjà atteint
+  assert.equal(await inCrm("Agence Deux"), false);
+  await settings({ importPerSegment: 30 });
 });
