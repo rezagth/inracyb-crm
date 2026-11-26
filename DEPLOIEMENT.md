@@ -284,3 +284,13 @@ psql "$PROD_URL" -X -v ON_ERROR_STOP=1 -f drizzle-manuel-phase-r.sql
 ```bash
 psql "$PROD_URL" -X -v ON_ERROR_STOP=1 -f drizzle-manuel-phase-s.sql
 ```
+
+## Phase T : écriture automatique des posts LinkedIn (sans clé API)
+
+**Aucune migration, rien à configurer dans Vercel.** L'écriture se fait par une tâche programmée de l'app Claude sur le Mac (« Écrire les posts LinkedIn quand le stock baisse », chaque jour à 10 h, mode Auto), qui utilise deux scripts du projet :
+
+- `npm run -s posts:context` (lecture seule) : stock de posts « Programmé », prochaines dates et thèmes, sujets récents, base de faits (baromètre recalculé en direct, Cybermalveillance.gouv.fr 2024, offres) et consignes d'écriture (`src/lib/post-generator.ts`). Une série de 20 posts n'est demandée que s'il reste moins de 10 posts programmés.
+- `npm run -s posts:insert -- <posts.json> [--dry]` : contrôle chaque post (`validateGeneratedPost` : chiffres présents dans la base de faits, aucune histoire de client, aucun nom d'entreprise du CRM, aucun lien hors infracyb.fr et cybermalveillance.gouv.fr, longueur, image, sujet non repris, date prévue). Conforme → « Programmé » ; sinon → « Rédigé », jamais publié sans relecture. Mail récapitulatif par Brevo.
+- **Republication de secours** (CRM, `/api/cron/linkedin`) : un jour ouvré sans post et sans aucun post programmé à venir, un ancien post publié il y a plus de 90 jours (et dont le sujet n'a pas été repris) est republié, avec une note dans le mail.
+- La tâche ne tourne que lorsque l'app Claude est ouverte (sinon au lancement suivant) : avec 10 posts d'avance, il faut deux semaines d'app fermée pour épuiser le stock.
+- Les chiffres de Cybermalveillance.gouv.fr (`CYBER_FACTS`) sont ceux du rapport 2024 : à mettre à jour à la publication du rapport suivant.

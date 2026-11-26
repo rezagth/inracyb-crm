@@ -21,7 +21,9 @@
     "sync:stratcyber": "tsx scripts/sync-stratcyber.ts",
     "db:studio": "drizzle-kit studio",
     "test": "tsx --test tests/*.test.ts",
-    "db:copy-sqlite": "tsx scripts/copy-from-sqlite.ts"
+    "db:copy-sqlite": "tsx scripts/copy-from-sqlite.ts",
+    "posts:context": "tsx scripts/posts-context.ts",
+    "posts:insert": "tsx scripts/posts-insert.ts"
   },
   "engines": {
     "node": ">=20.19"
