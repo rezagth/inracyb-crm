@@ -42,7 +42,7 @@
     },
     {
       "path": "/api/cron/linkedin",
-      "schedule": "0 7 * * 2,4"
+      "schedule": "0 7 * * 1-5"
     }
   ]
 }

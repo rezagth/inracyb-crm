@@ -275,3 +275,12 @@ psql "$PROD_URL" -X -v ON_ERROR_STOP=1 -f drizzle-manuel-phase-r.sql
 - **Repli** : non connecté, autorisation expirée ou refus de LinkedIn → mail avec le texte et l'image jointe, et l'erreur affichée sur la page Marketing.
 - **Autorisation** : chiffrée (AES-256-GCM, clé tirée d'`AUTH_SECRET`), valable 60 jours, non renouvelable automatiquement (réservé aux partenaires agréés de LinkedIn). Alerte 10 jours avant dans le mail du post et le rapport du lundi. Changer `AUTH_SECRET` oblige à reconnecter LinkedIn.
 - Un post resté au statut « en_cours » (coupure pendant la publication) n'est jamais republié automatiquement : vérifier sur LinkedIn, puis le passer en « Publié » ou « Programmé ».
+
+## Phase S : un post LinkedIn par jour ouvré
+
+- `vercel.json` : `/api/cron/linkedin` tourne du lundi au vendredi à 7 h UTC (8 h – 9 h à Paris l'hiver). Un jour sans post « Programmé » : rien ne se passe.
+- `drizzle-manuel-phase-s.sql` ajoute 16 posts (texte et image), un par jour ouvré du 27/11 au 31/12/2026, hors 25/12, en plus des 8 de la phase Q. Statut « Programmé » : ils partent tout seuls. Pour en bloquer un, le passer en « Rédigé » sur la page Marketing. Rejouable sans danger, aucune table modifiée.
+
+```bash
+psql "$PROD_URL" -X -v ON_ERROR_STOP=1 -f drizzle-manuel-phase-s.sql
+```
