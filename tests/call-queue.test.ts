@@ -61,3 +61,16 @@ test("lien tel: : chiffres seulement, + conservé, numéro trop court refusé", 
   assert.equal(telHref("12 34"), "");
   assert.equal(telHref("javascript:alert(1)"), "");
 });
+
+import { composeCallDigest, type QueueRow } from "../src/lib/call-queue";
+
+test("mail du matin : rien si la file est vide, sinon chauds d'abord avec numéro et constat", () => {
+  assert.equal(composeCallDigest([], "2026-11-26", "https://crm.exemple.fr"), null);
+  const row = (o: Partial<QueueRow>): QueueRow => ({ taskId: "t", companyId: "c", company: "Croko", contact: "Lorris C.", phone: "06 15 50 33 19", tel: "tel:+33615503319", title: "Appeler Croko au 06 15 50 33 19 : DMARC en p=none sur croko.eu", heat: "retard", dueDate: "2026-11-24", opening: "", attempts: 0, ...o });
+  const d = composeCallDigest([row({ heat: "consulte", company: "Vega" }), row({}), row({ attempts: 2 })], "2026-11-26", "https://crm.exemple.fr")!;
+  assert.equal(d.subject, "3 appels à passer aujourd'hui · 1 prospect chaud · 2 en retard");
+  assert.match(d.text, /^Appels du 26\/11\/2026/);
+  assert.match(d.text, /1\. \[A consulté la synthèse\] Vega — Lorris C\.\n   06 15 50 33 19 · DMARC en p=none sur croko\.eu/);
+  assert.match(d.text, /2 essai\(s\) sans réponse/);
+  assert.match(d.text, /https:\/\/crm\.exemple\.fr\/appels/);
+});

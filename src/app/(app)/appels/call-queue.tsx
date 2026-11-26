@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { Icon } from "@/components/icon";
 import { useToast } from "@/components/mod/toast";
 import { logCallOutcomeAction } from "@/server/actions/calls";
+import { PackQuoteButton } from "@/components/pack-quote-button";
 import {
   HEAT_LABEL,
   OUTCOME_LABEL,
@@ -13,19 +14,8 @@ import {
   type Outcome,
 } from "@/lib/call-queue";
 
-export type QueueRow = {
-  taskId: string;
-  companyId: string;
-  company: string;
-  contact: string;
-  phone: string;
-  tel: string;
-  title: string;
-  heat: Heat;
-  dueDate: string;
-  opening: string;
-  attempts: number;
-};
+export type { QueueRow } from "@/lib/call-queue";
+import type { QueueRow } from "@/lib/call-queue";
 
 const HEAT_TONE: Record<Heat, string> = {
   entrant: "ok",
@@ -234,6 +224,7 @@ function QueueItem({
             <Icon name="cal" />
             RDV obtenu
           </button>
+          <PackQuoteButton companyId={r.companyId} />
         </div>
         {mode && (
           <div className="flex flex-wrap items-center gap-2 text-[13px]">

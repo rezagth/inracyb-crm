@@ -6,6 +6,16 @@
  */
 export const PACK_COURRIER = { publicCents: 39000, pilotCents: 29000, pilotSlots: 3 } as const;
 
+/**
+ * Suivi Courrier & Domaine (phase M, 26/11/2026) : abonnement mensuel qui suit le Pack. Passer DMARC de « none » à « reject »
+ * demande plusieurs semaines de lecture des rapports ; le suivi fait ce travail puis vérifie chaque mois que rien ne se dégrade
+ * (SPF, DMARC, certificat) et envoie un bilan au client. Prix pilote pour les mêmes 3 premiers clients que le Pack.
+ */
+export const SUIVI_COURRIER = { publicCents: 4900, pilotCents: 3900, minMonths: 6 } as const;
+
+/** Prix mensuel du suivi selon qu'il reste des places pilotes. */
+export const suiviMonthlyCents = (slotsLeft: number): number => (slotsLeft > 0 ? SUIVI_COURRIER.pilotCents : SUIVI_COURRIER.publicCents);
+
 /** Remise accordée à un client recommandé par un expert-comptable, en pourcentage du prix. */
 export const REFERRED_CLIENT_DISCOUNT_PCT = 10;
 
@@ -23,4 +33,9 @@ export function packOfferText(slotsLeft: number): string {
   return slotsLeft > 0
     ? head + `${euros(PACK_COURRIER.pilotCents)} pour les ${PACK_COURRIER.pilotSlots} premiers clients, au lieu de ${euros(PACK_COURRIER.publicCents)}.`
     : head + `${euros(PACK_COURRIER.publicCents)}.`;
+}
+
+/** Phrase du suivi mensuel, affichée après l'offre Pack dans la synthèse envoyée au prospect. */
+export function suiviOfferText(slotsLeft: number): string {
+  return `Ensuite, le suivi mensuel (${euros(suiviMonthlyCents(slotsLeft))} par mois, ${SUIVI_COURRIER.minMonths} mois minimum) mène DMARC jusqu'au blocage des usurpations, vérifie chaque mois que rien ne s'est dégradé et vous envoie un bilan d'une page, utile face à un client ou à votre assureur.`;
 }

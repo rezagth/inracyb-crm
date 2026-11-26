@@ -5,7 +5,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
 import { db, schema } from "@/db";
 import { requireUser } from "@/lib/auth";
-import { CAMPAIGN_OFFERS, entryExclusion, ENTRY_EXCLUSION_LABEL, serviceOf, type EntryExclusion } from "@/lib/campaign";
+import { CAMPAIGN_OFFERS, SWITCH_REASON, entryExclusion, ENTRY_EXCLUSION_LABEL, serviceOf, type EntryExclusion } from "@/lib/campaign";
 import { usableDiagnostic } from "@/lib/diagnostic";
 import { isSegment, segmentOfSector } from "@/lib/diagnostic-mails";
 import { today } from "@/lib/format";
@@ -14,6 +14,7 @@ import { logEvent } from "../core";
 import { latestDiagnostics, queueDiagnostics, runDiagnostics } from "../diagnostic";
 import { crossHistories, optoutSet, recordOptout, recordRun, reservedSectors, restDays, resumeService, runCampaigns } from "../campaigns";
 import { registerReply, undoReply } from "../replies";
+import { auditSwitchPlan } from "../audit-switch";
 
 type R = { ok: true; message: string } | { ok: false; error: string };
 const offerZ = z.enum(CAMPAIGN_OFFERS as [string, ...string[]]);
@@ -161,4 +162,20 @@ export async function queueDiagnosticsAction(companyIds: string[]): Promise<R> {
   const r = await runDiagnostics({ budgetMs: 40_000 });
   revalidatePath("/campagnes");
   return { ok: true, message: `${added} entreprise(s) ajoutée(s) à la file. ${r.message}` };
+}
+
+/** Bascule Audit → Diagnostic : arrête les séquences Audit des cabinets réservés et des entreprises que le Diagnostic attend. */
+export async function switchAuditToDiagnosticAction(): Promise<R> {
+  await requireUser();
+  const plan = await auditSwitchPlan();
+  if (!plan.length) return { ok: true, message: "Rien à basculer." };
+  await db.transaction(async (tx) => {
+    for (const p of plan) {
+      await tx.update(schema.mailCampaignItems).set({ status: "arrete", stopReason: p.reason }).where(and(eq(schema.mailCampaignItems.id, p.itemId), eq(schema.mailCampaignItems.status, "en_cours")));
+      await logEvent(tx, p.companyId, "mail", `Séquence Audit arrêtée : ${p.reason.toLowerCase()}`);
+    }
+  });
+  revalidatePath("/campagnes");
+  const diag = plan.filter((p) => p.reason === SWITCH_REASON.diag).length;
+  return { ok: true, message: `${plan.length} séquence(s) Audit arrêtée(s)${diag ? ` · ${diag} entreprise(s) inscrite(s) au Diagnostic par l'alimentation (prochain passage, après le délai de repos)` : ""}` };
 }

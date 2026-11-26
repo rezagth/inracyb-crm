@@ -17,6 +17,10 @@ import { buildReport, MIN_SAMPLE, verdicts } from "@/lib/campaign-report";
 import { prospectRecords } from "@/server/campaign-report";
 import { PageHeader } from "@/components/ui";
 import { Campagnes } from "./campagnes";
+import { RunButton } from "@/components/mod/cells";
+import { auditSwitchPlan } from "@/server/audit-switch";
+import { switchAuditToDiagnosticAction } from "@/server/actions/campaigns";
+import { SWITCH_REASON } from "@/lib/campaign";
 
 export const metadata = { title: "Campagnes" };
 export const maxDuration = 60;
@@ -75,6 +79,8 @@ export default async function CampagnesPage() {
     return [{ id: p.id, name: p.name, sector: p.sector, email: p.email, kind: prescriberKindOf(p.sector), why: ex ? ENTRY_EXCLUSION_LABEL[ex] : null }];
   });
   const status = await checkServicePauses();
+  const switchPlan = await auditSwitchPlan();
+  const switchDiag = switchPlan.filter((p) => p.reason === SWITCH_REASON.diag).length;
   const statusOf = (k: ServiceKey) => ({ paused: status[k].paused, reason: status[k].reason, ...status[k].health });
   const sends = await db.select({ companyId: schema.mailSends.companyId, offer: schema.mailSends.offer }).from(schema.mailSends);
   const statsOf = (campaignId: string, offer: string) => {
@@ -110,7 +116,19 @@ export default async function CampagnesPage() {
   const offers = s.offers.split(",").filter((x): x is "audit" | "ciso" | "ia" => ["audit", "ciso", "ia"].includes(x));
   return (
     <>
-      <PageHeader title="Campagnes" subtitle="Envoie une séquence de mails (J0, J+3, J+7, J+14 ; J0 et J+7 pour les prescripteurs) à plusieurs entreprises d'un coup : le CRM étale les envois et s'arrête tout seul si l'entreprise avance, est perdue ou se désinscrit." />
+      <PageHeader
+        title="Campagnes"
+        subtitle="Envoie une séquence de mails (J0, J+3, J+7, J+14 ; J0 et J+7 pour les prescripteurs) à plusieurs entreprises d'un coup : le CRM étale les envois et s'arrête tout seul si l'entreprise avance, est perdue ou se désinscrit."
+        actions={
+          switchPlan.length ? (
+            <RunButton
+              action={switchAuditToDiagnosticAction}
+              label={`Basculer ${switchPlan.length} séquence(s) Audit`}
+              confirmText={`Arrêter ${switchPlan.length} séquence(s) Audit ?\n\n${switchDiag} entreprise(s) attendent le Diagnostic : l'alimentation les y inscrira.\n${switchPlan.length - switchDiag} cabinet(s) réservé(s) aux prescripteurs : plus de mail client.`}
+            />
+          ) : undefined
+        }
+      />
       <Campagnes
         prospects={prospects}
         offers={offers.length ? offers : ["audit"]}

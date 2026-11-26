@@ -3,7 +3,7 @@ import { and, desc, eq } from "drizzle-orm";
 import { db, schema } from "@/db";
 import { parseChecks } from "@/lib/diagnostic";
 import { mailAuthFinding, type ReportCta } from "@/lib/diagnostic-report";
-import { packOfferText, pilotSlotsLeft } from "@/lib/pricing";
+import { packOfferText, pilotSlotsLeft, suiviOfferText } from "@/lib/pricing";
 import { reportLinkFor } from "./campaigns";
 import { getProfile, pilotsSigned } from "./queries";
 
@@ -13,9 +13,10 @@ export async function latestReportLink(companyId: string): Promise<string | null
   return d ? reportLinkFor(d.id) : null;
 }
 
-/** Encadré d'action du rapport public : offre Pack seulement pour un constat de messagerie. */
+/** Encadré d'action du rapport public : offre Pack puis suivi mensuel, seulement pour un constat de messagerie. */
 export async function reportCta(findingsJson: string): Promise<ReportCta> {
   const p = await getProfile();
-  const offer = mailAuthFinding(parseChecks(findingsJson)) ? packOfferText(pilotSlotsLeft(await pilotsSigned())) : "";
+  const slots = pilotSlotsLeft(await pilotsSigned());
+  const offer = mailAuthFinding(parseChecks(findingsJson)) ? `${packOfferText(slots)} ${suiviOfferText(slots)}` : "";
   return { offer, calUrl: p.calUrl, contact: [p.phone, p.email].map((x) => x.trim()).filter(Boolean).join(" · ") };
 }

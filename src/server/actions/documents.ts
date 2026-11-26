@@ -10,6 +10,7 @@ import { PAY_METHODS, UNITS, stageRank } from "@/lib/constants";
 import { addDays, eur, parseEuroToCents, today } from "@/lib/format";
 import { draftNumber, getSettings, logEvent, nextNumber, type DbOrTx } from "../core";
 import { autoOn, bumpRuns } from "../automations";
+import { SUIVI_OFFER, oneOffPart, suiviFromLines } from "@/lib/pack-quote";
 
 type Result = { ok: true; id: string; message?: string } | { ok: false; error: string };
 
@@ -120,6 +121,16 @@ export async function acceptQuoteAction(id: string, signer: string): Promise<Res
             await tx.update(schema.quotes).set({ status: "accepte", signedBy: name.data, signedAt: new Date() }).where(eq(schema.quotes.id, id));
             await tx.update(schema.companies).set({ stage: "gagne", lastContact: today() }).where(eq(schema.companies.id, q.companyId));
             await logEvent(tx, q.companyId, "quote", `Devis ${q.number} accepté par ${name.data}`);
+            // Devis avec abonnement « Suivi Courrier & Domaine » : le contrat mensuel naît à l'acceptation (une seule fois).
+            const lines = await tx.select().from(schema.quoteLines).where(eq(schema.quoteLines.quoteId, id));
+            const monthly = suiviFromLines(lines);
+            if (monthly) {
+              const existing = await tx.select({ id: schema.contracts.id }).from(schema.contracts).where(and(eq(schema.contracts.companyId, q.companyId), eq(schema.contracts.offer, SUIVI_OFFER), eq(schema.contracts.status, "actif"))).limit(1);
+              if (!existing.length) {
+                await tx.insert(schema.contracts).values({ companyId: q.companyId, offer: SUIVI_OFFER, monthlyCents: monthly, start: today(), notice: "1 mois", status: "actif" });
+                await logEvent(tx, q.companyId, "note", `Contrat mensuel « ${SUIVI_OFFER} » créé : ${eur(monthly)} HT par mois, bilan mensuel automatique.`);
+              }
+            }
           });
   if ((await autoOn("acompte"))) {
     const r = await invoiceFromQuoteAction(id, "30");
@@ -150,16 +161,19 @@ export async function invoiceFromQuoteAction(quoteId: string, part: "100" | "30"
   const q = await db.query.quotes.findFirst({ where: eq(schema.quotes.id, quoteId), with: { lines: true, invoices: true } });
   if (!q || q.status !== "accepte") return { ok: false, error: "Le devis doit être accepté avant d'être facturé." };
   const already = q.invoices.filter((i) => i.kind === "facture" && i.status !== "annulee").reduce((a, i) => a + i.totalHtCents, 0);
+  // L'abonnement « Suivi » se facture chaque mois par son contrat : la facture du devis n'en reprend que la part ponctuelle.
+  const part1 = oneOffPart(q.lines, q.totalHtCents);
+  if (!part1.lines.length) return { ok: false, error: "Ce devis ne contient que l'abonnement : il se facture chaque mois depuis la page Contrats." };
   let lines: { label: string; quantity: number; unit: string; unitPriceCents: number }[];
   let subject: string;
   if (part === "100") {
     if (already > 0) return { ok: false, error: "Ce devis est déjà partiellement facturé : choisis « Solde »." };
-    lines = q.lines.map((l) => ({ label: l.label, quantity: l.quantity, unit: l.unit, unitPriceCents: l.unitPriceCents }));
+    lines = part1.lines.map((l) => ({ label: l.label, quantity: l.quantity, unit: l.unit, unitPriceCents: l.unitPriceCents }));
     subject = `${q.subject} (${q.number})`;
   } else {
-    const amount = part === "solde" ? q.totalHtCents - already : Math.round((q.totalHtCents * Number(part)) / 100);
+    const amount = part === "solde" ? part1.baseHtCents - already : Math.round((part1.baseHtCents * Number(part)) / 100);
     if (amount <= 0) return { ok: false, error: "Ce devis est déjà entièrement facturé." };
-    if (already + amount > q.totalHtCents) return { ok: false, error: `Le montant dépasse le devis (déjà facturé : ${eur(already)} HT).` };
+    if (already + amount > part1.baseHtCents) return { ok: false, error: `Le montant dépasse le devis (déjà facturé : ${eur(already)} HT).` };
     subject = `${part === "solde" ? "Solde" : `Acompte ${part} %`} — ${q.subject} (${q.number})`;
     lines = [{ label: subject, quantity: 1, unit: "forfait", unitPriceCents: amount }];
   }
@@ -174,7 +188,7 @@ export async function invoiceFromQuoteAction(quoteId: string, part: "100" | "30"
       return inv.id;
     }));
   revalidatePath("/", "layout");
-  return { ok: true, id, message: "Facture créée en brouillon" };
+  return { ok: true, id, message: part1.excluded ? "Facture créée en brouillon (sans l'abonnement, facturé chaque mois par son contrat)" : "Facture créée en brouillon" };
 }
 
 /* ============================== FACTURES ============================== */

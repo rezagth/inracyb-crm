@@ -344,3 +344,21 @@ export function originBlock(source: string, service: ServiceKey): string | null 
   if (source === "historique") return service === "audit" ? null : "Origine de l'adresse non vérifiée (adresse historique) : ressaisis-la sur la fiche pour le diagnostic.";
   return "Origine de l'adresse inconnue : ressaisis-la sur la fiche.";
 }
+
+/** Motifs d'arrêt de la bascule Audit → Diagnostic (phase M). */
+export const SWITCH_REASON = { diag: "Basculée vers le Diagnostic", reserved: "Cabinet réservé aux prescripteurs" } as const;
+
+/**
+ * Bascule Audit → Diagnostic (phase M) : parmi les séquences Audit en cours, celles à arrêter.
+ * - cabinet d'un secteur réservé aux prescripteurs : arrêt (plus jamais prospecté comme client) ;
+ * - entreprise que l'alimentation attend d'inscrire au Diagnostic (étape « a_inscrire ») : arrêt, l'alimentation l'inscrit ensuite.
+ * Les autres séquences continuent.
+ */
+export function planAuditSwitch(items: { itemId: string; offer: string; sector: string; feedStage: string }[], reserved: readonly string[]): { itemId: string; reason: string }[] {
+  return items.flatMap<{ itemId: string; reason: string }>((i) => {
+    if (serviceOf(i.offer) !== "audit") return [];
+    if (reserved.includes(i.sector)) return [{ itemId: i.itemId, reason: SWITCH_REASON.reserved }];
+    if (i.feedStage === "a_inscrire") return [{ itemId: i.itemId, reason: SWITCH_REASON.diag }];
+    return [];
+  });
+}

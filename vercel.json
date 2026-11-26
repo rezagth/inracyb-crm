@@ -9,6 +9,10 @@
       "schedule": "30 6 * * 1-5"
     },
     {
+      "path": "/api/cron/suivi",
+      "schedule": "45 6 * * 1-5"
+    },
+    {
       "path": "/api/cron/reponses",
       "schedule": "30 7 * * 1-5"
     },

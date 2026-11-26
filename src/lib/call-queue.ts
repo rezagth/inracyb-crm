@@ -120,3 +120,41 @@ export function telHref(phone: string): string {
   if (digits.length < 9) return "";
   return "tel:" + (p.startsWith("+") ? "+" : "") + digits;
 }
+
+/** Ligne de la file d'appels affichée (page Appels) et reprise dans le mail du matin. */
+export type QueueRow = {
+  taskId: string;
+  companyId: string;
+  company: string;
+  contact: string;
+  phone: string;
+  tel: string;
+  title: string;
+  heat: Heat;
+  dueDate: string;
+  opening: string;
+  attempts: number;
+};
+
+/**
+ * Mail du matin (phase M) : les appels du jour, les plus chauds d'abord, avec le numéro et le constat.
+ * null quand la file est vide : aucun mail. Texte brut, envoyé au propriétaire du CRM seulement.
+ */
+export function composeCallDigest(rows: QueueRow[], today: string, appUrl: string): { subject: string; text: string } | null {
+  if (!rows.length) return null;
+  const late = rows.filter((r) => r.heat === "retard").length;
+  const hot = rows.filter((r) => r.heat === "entrant" || r.heat === "consulte" || r.heat === "repondu").length;
+  const [y, m, d] = today.split("-");
+  const subject = `${rows.length} appel${rows.length > 1 ? "s" : ""} à passer aujourd'hui${hot ? ` · ${hot} prospect${hot > 1 ? "s" : ""} chaud${hot > 1 ? "s" : ""}` : ""}${late ? ` · ${late} en retard` : ""}`;
+  const lines = rows.slice(0, 25).map((r, i) => {
+    const who = [r.company, r.contact].filter(Boolean).join(" — ");
+    const finding = r.title.split(" : ").slice(1).join(" : ");
+    return `${i + 1}. [${HEAT_LABEL[r.heat]}] ${who}\n   ${r.phone || "pas de numéro"}${finding ? ` · ${finding}` : ""}${r.attempts ? ` · ${r.attempts} essai(s) sans réponse` : ""}`;
+  });
+  const more = rows.length > 25 ? `\n… et ${rows.length - 25} autre(s).` : "";
+  const url = appUrl ? `\n\nLa file, les phrases d'ouverture et le bouton « Devis Pack + Suivi » : ${appUrl}/appels` : "";
+  return {
+    subject,
+    text: `Appels du ${d}/${m}/${y}\n\nUn appel le lendemain d'un mail double les chances de réponse. Note chaque résultat en un clic sur la page Appels.\n\n${lines.join("\n\n")}${more}${url}\n`,
+  };
+}

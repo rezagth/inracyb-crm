@@ -247,3 +247,18 @@ test("prescripteurs : cabinets réservés, jamais de discours client après le d
   // Sans secteur connu (appel d'avant), la règle des cabinets ne s'applique pas : comportement inchangé.
   assert.equal(c.entryExclusion({ id: "x", name: "X", stage: "qualif", email: "contact@x.fr" }, none, none, "audit", undefined, t, 30, reserved), null);
 });
+
+import { planAuditSwitch, SWITCH_REASON } from "../src/lib/campaign";
+
+test("bascule Audit → Diagnostic : cabinets réservés et entreprises attendues par le Diagnostic seulement", () => {
+  const plan = planAuditSwitch(
+    [
+      { itemId: "a", offer: "audit", sector: "Notariat", feedStage: "" },
+      { itemId: "b", offer: "audit", sector: "Numérique", feedStage: "a_inscrire" },
+      { itemId: "c", offer: "audit", sector: "Numérique", feedStage: "inscrit" },
+      { itemId: "d", offer: "diagnostic", sector: "Notariat", feedStage: "a_inscrire" },
+    ],
+    ["Notariat", "Juridique", "Expertise comptable"],
+  );
+  assert.deepEqual(plan, [{ itemId: "a", reason: SWITCH_REASON.reserved }, { itemId: "b", reason: SWITCH_REASON.diag }]);
+});

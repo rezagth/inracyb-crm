@@ -4,6 +4,7 @@ import { today } from "@/lib/format";
 import { cronAuthorized } from "@/server/cron-auth";
 import { recordRun, runCampaigns, runFailed, type RunSummary } from "@/server/campaigns";
 import { processReplies } from "@/server/replies";
+import { sendCallDigest } from "@/server/weekly-report";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -16,6 +17,8 @@ export async function GET(req: NextRequest) {
   await processReplies().catch(() => undefined);
   // Jour férié : aucun envoi automatique, les mails dus partent au prochain jour ouvré (l'envoi manuel reste possible).
   const r: RunSummary = isFrenchHoliday(today()) ? { ok: true, sent: 0, stopped: 0, errors: 0, waiting: 0, message: "Jour férié : aucun envoi automatique aujourd'hui." } : await runCampaigns();
+  // Après les envois (les mails J+3 du jour créent les appels de demain) : la file d'appels du jour par mail au propriétaire.
+  if (!isFrenchHoliday(today())) r.message += await sendCallDigest();
   await recordRun("cron", r);
   // Statut 500 en cas d'échec : Vercel marque alors le déclenchement en erreur (visible dans Logs / Cron Jobs), et la page Campagnes l'affiche.
   return NextResponse.json({ ok: !runFailed(r), sent: r.sent, stopped: r.stopped, errors: r.errors, waiting: r.waiting, message: r.message }, { status: runFailed(r) ? 500 : 200 });

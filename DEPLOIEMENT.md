@@ -210,3 +210,18 @@ psql "$PROD_URL" -X -v ON_ERROR_STOP=1 -f drizzle-manuel-phase-j.sql
 - **CRM** : adresse `/api/webhooks/lead`, fermée tant que `LEAD_WEBHOOK_SECRET` (32 caractères au moins, `openssl rand -hex 32`) n'est pas dans Vercel. Chaque demande est signée par le serveur du site (HMAC de « horodatage.corps », 5 minutes). Une demande crée ou retrouve la fiche (contact d'origine « formulaire » : jamais de séquence de prospection), diagnostique le domaine de l'adresse, met un appel « Demande entrante » en tête de la page Appels et envoie la synthèse par Brevo (lien de désinscription inclus). 50 demandes par jour au plus.
 - **Site** (projet Vercel du site) : `LEAD_WEBHOOK_SECRET` (le même que le CRM), `CRM_URL` (adresse https du CRM, sans `/` final), puis `LEAD_FORMS_ENABLED=1` seulement quand l'éditeur est renseigné dans `lib/site.ts` (`LEGAL`) et le texte de `/confidentialite` validé. Sans cela, `/test-messagerie` propose la prise de rendez-vous et l'autodiagnostic fonctionne sans formulaire de rappel.
 - **StratCyber** : les boutons « Auto-évaluation » des pages de conformité mènent à `https://www.infracyb.fr/autodiagnostic`.
+
+## Phase M : offre récurrente « Pack + Suivi », appels du matin, bilans mensuels
+
+**Migration, avant de déployer le code** (branche de sauvegarde Neon d'abord) : `drizzle-manuel-phase-m.sql` ajoute au catalogue le Pack Courrier (absent de la production au 26/11) et l'abonnement Suivi. Aucune table modifiée, rejouable sans danger.
+
+```bash
+psql "$PROD_URL" -X -v ON_ERROR_STOP=1 -f drizzle-manuel-phase-m.sql
+```
+
+- **Offre Suivi Courrier & Domaine** : 49 € HT/mois (39 € pour les 3 clients pilotes), 6 mois d'engagement, dans `src/lib/pricing.ts`. La synthèse publique `/r/…` l'annonce après le Pack. Les mails de séquence ne changent pas.
+- **Bouton « Devis Pack + Suivi »** (file d'appels et fiche entreprise) : devis en brouillon, prérempli avec le domaine du dernier diagnostic et le prix pilote s'il reste des places. À relire, émettre, envoyer.
+- **Acceptation du devis** : le contrat mensuel « Suivi Courrier & Domaine » est créé tout seul (page Contrats). La facture tirée du devis ne reprend que le Pack : l'abonnement se facture chaque mois depuis Contrats.
+- **Mail des appels du jour** : après les envois de 8 h, le CRM t'envoie la file d'appels (numéros, constats, essais). Rien si la file est vide. Destinataire : `REPORT_TO_EMAIL`, sinon l'e-mail du profil.
+- **Bilan mensuel** (`/api/cron/suivi`, jours ouvrés à 6 h 45 UTC) : à partir du mois qui suit la signature, nouvelle mesure du domaine, mail au contact principal (étiquettes `facturation` et `suivi`, expéditeur de facturation), tâche prioritaire si un écart apparaît. Sans Brevo ou sans e-mail : tâche « envoyer à la main », texte dans le journal.
+- **Bascule Audit → Diagnostic** (bouton en haut de la page Campagnes, visible s'il y a quelque chose à basculer) : arrête les séquences Audit des cabinets réservés aux prescripteurs et des entreprises que le Diagnostic attend. L'alimentation les inscrit ensuite, après le délai de repos habituel.

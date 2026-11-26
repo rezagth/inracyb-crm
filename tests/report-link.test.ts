@@ -3,7 +3,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { isHumanView, makeReportToken, readReportToken, REPORT_LINK_DAYS } from "../src/lib/report-link";
 import { mailAuthFinding, renderReport } from "../src/lib/diagnostic-report";
-import { packOfferText } from "../src/lib/pricing";
+import { packOfferText, suiviMonthlyCents, suiviOfferText } from "../src/lib/pricing";
 import type { Check } from "../src/lib/diagnostic";
 
 const S = "un-secret-de-test-assez-long-1234567890";
@@ -47,4 +47,11 @@ test("encadré d'action : offre Pack pour la messagerie, lien https seulement, t
   assert.match(html, /&lt;b&gt;jean&lt;\/b&gt;/);
   assert.doesNotMatch(renderReport({ ...report, checks: [], cta: { offer: "", calUrl: "javascript:alert(1)", contact: "" } }), /class="cta"|javascript:/);
   assert.doesNotMatch(renderReport({ ...report, checks: [] }), /class="cta"/); // version interne : pas d'encadré
+});
+
+test("suivi mensuel : prix pilote tant qu'il reste des places, engagement annoncé", () => {
+  assert.equal(suiviMonthlyCents(1), 3900);
+  assert.equal(suiviMonthlyCents(0), 4900);
+  assert.match(suiviOfferText(2), /39\s€ HT par mois, 6 mois minimum/);
+  assert.match(suiviOfferText(0), /49\s€ HT par mois/);
 });
